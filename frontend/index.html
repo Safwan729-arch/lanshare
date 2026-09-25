@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0d1117" />
+    <meta name="color-scheme" content="light dark" />
+    <title>LANShare</title>
+    <link rel="stylesheet" href="/css/styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#8646;</text></svg>"
+    />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">⇄</span>
+        <span>LANShare</span>
+      </div>
+      <div class="identity">
+        <span class="status">
+          <span id="status-dot" class="dot" data-state="offline"></span>
+          <span id="status-text">Connecting…</span>
+        </span>
+        <button type="button" class="name-button" title="Rename this device">
+          <span id="self-name">This device</span>
+          <span class="pencil" aria-hidden="true">✎</span>
+        </button>
+      </div>
+    </header>
+
+    <div id="waiting-screen" class="waiting" hidden>
+      <div class="waiting-card">
+        <span class="waiting-spinner" aria-hidden="true"></span>
+        <h2>Waiting for approval</h2>
+        <p>
+          This device needs to be allowed before it can send or receive files.
+          Approve <strong id="waiting-name">this device</strong> on the computer
+          running LANShare.
+        </p>
+        <p class="waiting-hint">
+          Running LANShare on this computer? Open
+          <a id="waiting-host-url" href="/">the page on localhost</a>
+          and press <strong>Allow</strong>. Only a browser reaching the server
+          through <code>localhost</code> is trusted on sight &mdash; over the
+          network the server cannot tell your browser from anyone else's.
+        </p>
+        <p id="waiting-denied" class="waiting-denied" hidden>
+          Access was refused on the host.
+        </p>
+        <p id="waiting-offline" class="waiting-denied" hidden>
+          Cannot reach the server right now — it may have been restarted.
+          Reload this page.
+        </p>
+      </div>
+    </div>
+
+    <main>
+      <section id="pending-panel" class="panel panel-alert" hidden>
+        <h2>Waiting to be allowed</h2>
+        <ul id="pending-list" class="pending-list"></ul>
+      </section>
+
+      <section class="panel">
+        <h2>Send to</h2>
+        <div id="device-list" class="device-list"></div>
+        <p id="devices-empty" class="empty">
+          No other devices yet. Open this page on your phone using the address below.
+        </p>
+      </section>
+
+      <section class="panel">
+        <h2>Files</h2>
+        <div
+          id="dropzone"
+          class="dropzone"
+          role="button"
+          tabindex="0"
+          data-dragging="false"
+          aria-label="Choose files to send"
+        >
+          <span class="dropzone-icon" aria-hidden="true">＋</span>
+          <span class="dropzone-title">Tap to choose files</span>
+          <span class="dropzone-hint">or drag and drop them here</span>
+        </div>
+        <input id="file-input" type="file" multiple hidden />
+      </section>
+
+      <section id="uploads-panel" class="panel" hidden>
+        <h2>
+          Sending
+          <button id="clear-finished" type="button" class="link-button">Clear finished</button>
+        </h2>
+        <ul id="upload-list" class="transfer-list"></ul>
+      </section>
+
+      <section id="incoming-panel" class="panel" hidden>
+        <h2>Incoming</h2>
+        <ul id="incoming-list" class="transfer-list"></ul>
+      </section>
+
+      <section class="panel">
+        <h2>Add a device</h2>
+        <div class="pairing">
+          <img id="qr-image" class="qr" alt="QR code for this server's address" width="140" height="140" />
+          <div class="pairing-text">
+            <p class="pairing-hint">Point another device's camera at this code, or type the address:</p>
+            <p id="pairing-url" class="pairing-url">…</p>
+            <p id="pairing-mdns" class="pairing-mdns" hidden>
+              On Apple devices you can also use <span id="pairing-mdns-url" class="pairing-url"></span>
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="peers-panel" class="panel" hidden>
+        <h2>Other LANShare servers</h2>
+        <ul id="peer-list" class="peer-list"></ul>
+        <p class="empty">
+          Separate servers with their own devices and files. Opening one takes you there.
+        </p>
+      </section>
+
+      <section class="panel">
+        <h2>History</h2>
+        <ul id="history-list" class="history-list"></ul>
+        <p id="history-empty" class="empty">Nothing sent yet.</p>
+      </section>
+    </main>
+
+    <footer>
+      <span id="server-hint">LAN only — files never leave your network.</span>
+    </footer>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+    <script type="module" src="/js/app.js"></script>
+  </body>
+</html>

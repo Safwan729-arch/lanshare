@@ -1,0 +1,625 @@
+/* Mobile-first. Touch targets stay at or above 44px, the iOS minimum. */
+
+/*
+ * The `hidden` attribute must beat our own layout rules.
+ *
+ * The browser's default sheet says `[hidden] { display: none }`, but that is
+ * specificity (0,1,0) - exactly the same as a class. An author rule at equal
+ * specificity wins, so `.panel { display: grid }` silently re-showed every
+ * element the JS had just hidden. The whole waiting screen was permanently
+ * visible because of this.
+ */
+[hidden] {
+  display: none !important;
+}
+
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --border: #e3e6ea;
+  --text: #16191d;
+  --muted: #646d78;
+  --accent: #2f6df6;
+  --accent-soft: #e8f0ff;
+  --success: #1a8b52;
+  --danger: #c8372d;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 4px 12px rgb(16 24 40 / 4%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --border: #262d36;
+    --text: #e7ebf0;
+    --muted: #97a1ad;
+    --accent: #4b86ff;
+    --accent-soft: #17233c;
+    --success: #3fb97b;
+    --danger: #f0655a;
+    --shadow: none;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0 0 env(safe-area-inset-bottom);
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* -- top bar --------------------------------------------------------------- */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(12px + env(safe-area-inset-top)) 16px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.brand-mark {
+  color: var(--accent);
+  font-size: 20px;
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.dot[data-state='online'] {
+  background: var(--success);
+}
+
+.dot[data-state='reconnecting'] {
+  background: #d9a406;
+}
+
+.dot[data-state='offline'] {
+  background: var(--danger);
+}
+
+.name-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.pencil {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* -- layout ---------------------------------------------------------------- */
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px;
+  display: grid;
+  gap: 16px;
+}
+
+.panel {
+  padding: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.panel h2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* -- devices --------------------------------------------------------------- */
+
+.device-list {
+  display: grid;
+  gap: 8px;
+}
+
+.device-list:empty {
+  display: none;
+}
+
+.device {
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 56px;
+  padding: 10px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.device[data-selected='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.device-icon {
+  font-size: 22px;
+}
+
+.device-name {
+  font-weight: 550;
+}
+
+.device-state {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* -- dropzone -------------------------------------------------------------- */
+
+.dropzone {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 32px 16px;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+  cursor: pointer;
+}
+
+.dropzone[data-dragging='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.dropzone-icon {
+  font-size: 28px;
+  color: var(--accent);
+}
+
+.dropzone-title {
+  font-weight: 600;
+}
+
+.dropzone-hint {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* -- transfers ------------------------------------------------------------- */
+
+.transfer-list,
+.history-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.transfer {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.transfer-head {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.transfer-name {
+  overflow: hidden;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-size,
+.transfer-status {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.progress {
+  height: 6px;
+  overflow: hidden;
+  background: var(--border);
+  border-radius: 999px;
+}
+
+.progress-bar {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.2s ease-out;
+}
+
+.transfer[data-status='completed'] .progress-bar {
+  background: var(--success);
+}
+
+.transfer[data-status='failed'] .progress-bar,
+.transfer[data-status='cancelled'] .progress-bar {
+  background: var(--danger);
+}
+
+/* -- history --------------------------------------------------------------- */
+
+.history-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-row:last-child {
+  border-bottom: none;
+}
+
+.history-name {
+  overflow: hidden;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-meta {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.history-status {
+  grid-row: 1;
+  grid-column: 2;
+  align-self: center;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.history-row[data-status='completed'] .history-status {
+  color: var(--success);
+}
+
+.history-row[data-status='failed'] .history-status,
+.history-row[data-status='cancelled'] .history-status {
+  color: var(--danger);
+}
+
+/* -- waiting for approval -------------------------------------------------- */
+
+.waiting {
+  display: grid;
+  place-items: center;
+  min-height: 100dvh;
+  padding: 24px 16px;
+}
+
+.waiting-card {
+  max-width: 420px;
+  padding: 28px 24px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.waiting-card h2 {
+  margin: 16px 0 8px;
+  font-size: 19px;
+}
+
+.waiting-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.waiting-spinner {
+  display: inline-block;
+  width: 26px;
+  height: 26px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.waiting-denied {
+  margin-top: 14px !important;
+  color: var(--danger) !important;
+  font-weight: 550;
+}
+
+/* -- pending approvals ----------------------------------------------------- */
+
+.panel-alert {
+  border-color: var(--accent);
+}
+
+.pending-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pending-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+}
+
+.pending-details {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pending-name {
+  font-weight: 600;
+}
+
+.pending-meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pending-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.button-quiet {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+/* -- peers ----------------------------------------------------------------- */
+
+.peer-list {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.peer-row {
+  display: grid;
+  gap: 2px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.peer-link {
+  color: var(--accent);
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.peer-meta {
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* -- pairing --------------------------------------------------------------- */
+
+.pairing {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.qr {
+  flex: none;
+  width: 140px;
+  height: 140px;
+  /* The QR is generated dark-on-white; keep that background in dark mode too,
+     because phone cameras are unreliable at reading an inverted code. */
+  padding: 6px;
+  background: #fff;
+  border-radius: 8px;
+}
+
+.pairing-text {
+  min-width: 0;
+}
+
+.pairing-hint {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.pairing-mdns {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pairing-mdns .pairing-url {
+  font-size: 13px;
+}
+
+.pairing-url {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 15px;
+  /* Selectable so it can be typed or copied by hand - the Clipboard API needs
+     a secure context, which plain http on a LAN address is not. */
+  user-select: all;
+}
+
+/* -- buttons --------------------------------------------------------------- */
+
+.button-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 18px;
+  background: var(--accent);
+  border-radius: 10px;
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.link-button {
+  justify-self: start;
+  min-height: 36px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 14px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* -- footer & toast -------------------------------------------------------- */
+
+footer {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 8px 16px 24px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 20;
+  max-width: calc(100vw - 32px);
+  padding: 12px 18px;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--bg);
+  border-radius: 999px;
+  font-size: 14px;
+  box-shadow: 0 6px 24px rgb(16 24 40 / 18%);
+}
+
+.toast[data-kind='error'] {
+  background: var(--danger);
+  color: #fff;
+}
+
+.toast[data-kind='success'] {
+  background: var(--success);
+  color: #fff;
+}
+
+@media (min-width: 640px) {
+  .device-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-bar {
+    transition: none;
+  }
+}

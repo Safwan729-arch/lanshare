@@ -1,0 +1,28 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+build/
+dist/
+
+.env
+data/
+storage/incoming/*
+storage/temporary/*
+!storage/incoming/.gitkeep
+!storage/temporary/.gitkeep
+
+# Personal knowledge base and working notes - kept local, not published.
+vault/
+
+# A stray Obsidian workspace (editor state and its default Welcome note).
+# Leading slash matters: an unanchored `LanShare/` also matches
+# `server/lanshare/` - patterns match at any depth, and git on Windows is
+# case-insensitive by default, so it would exclude the entire application.
+/LanShare/
+
+# Certificates, if you enable HTTPS.
+*.pem
