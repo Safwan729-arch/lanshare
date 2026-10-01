@@ -11,10 +11,19 @@ import {
   createTransfer,
   getTransfer,
   uploadChunk,
-} from './api.js';
+} from './api.js?v=10';
 
 const MAX_CHUNK_ATTEMPTS = 3;
 const RETRY_BASE_MS = 600;
+
+/**
+ * Largest file we are willing to hold in memory as a recovery measure.
+ *
+ * Only reached after a chunk has already stalled, so the ordinary path never
+ * pays for it. A phone tab has perhaps a gigabyte before iOS kills it, and
+ * losing the tab would be worse than failing the transfer.
+ */
+const BUFFER_FALLBACK_LIMIT = 256 * 1024 * 1024;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -33,6 +42,7 @@ export class Upload {
     this.error = null;
     this.current = null; // the in-flight chunk request
     this.cancelled = false;
+    this.buffer = null; // whole-file bytes, only once slicing has failed us
   }
 
   get progress() {
@@ -94,17 +104,50 @@ export class Upload {
     }
   }
 
-  async sendChunk(index) {
+  /**
+   * The bytes for one chunk.
+   *
+   * Normally a lazy slice of the file, which costs nothing. Once `bufferFile`
+   * has run we slice the copy in memory instead.
+   */
+  bodyFor(index) {
     const start = index * this.chunkSize;
-    const blob = this.file.slice(start, Math.min(start + this.chunkSize, this.file.size));
+    const end = Math.min(start + this.chunkSize, this.file.size);
+    return this.buffer ? this.buffer.slice(start, end) : this.file.slice(start, end);
+  }
+
+  /**
+   * Read the whole file once, so no further slices of it are needed.
+   *
+   * On iOS a file picked from the Photos library is exported lazily, and a
+   * slice past the part already exported can simply never yield data: the
+   * request is never dispatched, the server sees nothing at all, and the
+   * upload sits at one chunk forever. Reading the file in a single pass
+   * sidesteps the repeated reads.
+   *
+   * Returns false when the file is too large to hold, leaving the stall to be
+   * reported honestly rather than trading it for a killed tab.
+   */
+  async bufferFile() {
+    if (this.buffer || this.file.size > BUFFER_FALLBACK_LIMIT) return false;
+    this.buffer = await this.file.arrayBuffer();
+    return true;
+  }
+
+  async sendChunk(index) {
     const completedBytes = this.sentChunks.size * this.chunkSize;
 
     for (let attempt = 1; attempt <= MAX_CHUNK_ATTEMPTS; attempt += 1) {
       if (this.cancelled) return;
+      // Rebuilt every attempt: a retry after a stall may need to come from the
+      // buffered copy rather than from another slice of the file.
       this.current = uploadChunk({
         transferId: this.transferId,
         index,
-        blob,
+        blob: this.bodyFor(index),
+        // The suspect variable: a chunk that is the entire file has always
+        // worked; one that is a slice of it has always hung.
+        whole: this.chunkSize >= this.file.size ? 'yes' : 'no',
         onProgress: (loaded) => {
           this.bytesSent = Math.min(completedBytes + loaded, this.file.size);
           this.report();
@@ -119,6 +162,17 @@ export class Upload {
         return;
       } catch (error) {
         if (this.cancelled || error.name === 'AbortError') throw error;
+
+        // Nothing moved at all. Before spending another attempt on the same
+        // dead read, try to get the bytes a different way.
+        if (error.name === 'StallError' && !this.buffer) {
+          try {
+            await this.bufferFile();
+          } catch {
+            // The whole-file read failed too; the retry below will report it.
+          }
+        }
+
         if (attempt === MAX_CHUNK_ATTEMPTS) throw error;
         // A dropped Wi-Fi packet or a backgrounded tab: wait, then retry the
         // same index. Re-sending a chunk is safe, the server overwrites it.
