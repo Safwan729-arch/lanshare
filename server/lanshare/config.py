@@ -60,6 +60,18 @@ class Settings(BaseSettings):
     #: chosen per transfer by ``chunk_size_for``; small files are unaffected.
     chunk_size: int = Field(default=4 * MIB, ge=64 * 1024, le=MAX_CHUNK_SIZE)
 
+    #: How long an idle connection is kept open for reuse.
+    #:
+    #: Uvicorn's own default is 5 seconds, which is shorter than it takes to pick
+    #: a video out of a phone's gallery. The browser pools the connection, the
+    #: server closes it, and the `POST` that starts the next transfer goes out on
+    #: a dead socket. A browser will not retry a POST - it is not safe to repeat -
+    #: so the upload hangs with no error. Proven on the wire: a POST sent 1s after
+    #: the previous request succeeds, the same POST at 7s is refused.
+    #:
+    #: This only costs an idle socket per device on a LAN with a handful of them.
+    keep_alive_timeout: int = Field(default=120, ge=5, le=3600)
+
     #: Per-file ceiling. Note the disk cost: assembly needs roughly twice the
     #: file size free, or three times when ``incoming_dir`` and
     #: ``temporary_dir`` are on different drives.

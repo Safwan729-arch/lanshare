@@ -48,6 +48,9 @@ def main() -> None:
         host=settings.host,
         port=settings.port,
         log_level="info",
+        # See `keep_alive_timeout`: uvicorn's 5s default closes the connection
+        # while the user is still choosing a file.
+        timeout_keep_alive=settings.keep_alive_timeout,
         ssl_certfile=certfile,
         ssl_keyfile=keyfile,
     )
