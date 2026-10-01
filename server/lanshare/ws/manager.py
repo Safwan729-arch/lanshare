@@ -11,6 +11,8 @@ from typing import Any
 
 from fastapi import WebSocket
 
+from .. import timing
+
 logger = logging.getLogger(__name__)
 
 
@@ -55,10 +57,16 @@ class ConnectionManager:
 
     async def send(self, device_id: str, message: dict[str, Any]) -> None:
         """Send to every socket a device holds. Dead sockets are dropped."""
-        for websocket in list(self._connections.get(device_id, ())):
+        sockets = list(self._connections.get(device_id, ()))
+        timing.mark(
+            "ws.send.start", device=device_id[:8], sockets=len(sockets), kind=message.get("type")
+        )
+        for number, websocket in enumerate(sockets):
             try:
                 await websocket.send_json(message)
+                timing.mark("ws.send.ok", device=device_id[:8], socket=number)
             except (RuntimeError, OSError) as exc:  # closed mid-send
+                timing.mark("ws.send.fail", device=device_id[:8], socket=number, error=repr(exc))
                 logger.debug("Dropping dead socket for %s: %s", device_id, exc)
                 self.remove(device_id, websocket)
 

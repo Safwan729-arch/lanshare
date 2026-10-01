@@ -17,6 +17,7 @@ from typing import Any, Final
 import aiosqlite
 from starlette.concurrency import run_in_threadpool
 
+from .. import timing
 from ..config import MAX_CHUNK_SIZE
 from ..db.repositories import DeviceRepository, TransferRepository
 from ..ws.manager import ConnectionManager, event
@@ -199,10 +200,12 @@ class TransferService:
         # Worked out before the write, so it can bound it rather than audit it.
         expected = self._expected_chunk_size(transfer, index)
 
+        timing.mark("body.read.start", tid=transfer_id[:8], index=index, expected=expected)
         try:
             written = await self._storage.write_chunk(transfer_id, index, stream, limit=expected)
         except StorageError as exc:
             raise BadRequest(str(exc)) from exc
+        timing.mark("body.read.done", tid=transfer_id[:8], index=index, written=written)
 
         if written != expected:
             # Drop the short chunk so a resume re-sends it, rather than
@@ -212,8 +215,10 @@ class TransferService:
 
         if transfer["status"] == "pending":
             await TransferRepository.set_status(self._conn, transfer_id, "uploading")
+        timing.mark("db.status.done", tid=transfer_id[:8], index=index)
 
         received = len(self._storage.received_chunks(transfer_id))
+        timing.mark("notify.start", tid=transfer_id[:8], index=index, received=received)
         await self._notify(
             transfer,
             event(
@@ -225,6 +230,7 @@ class TransferService:
                 size=transfer["size"],
             ),
         )
+        timing.mark("notify.done", tid=transfer_id[:8], index=index)
         return written, received
 
     async def get(self, transfer_id: str, *, device_id: str | None = None) -> dict[str, Any]:

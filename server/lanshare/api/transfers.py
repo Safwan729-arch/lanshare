@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Path, Query, Request
 
+from .. import timing
 from ..models import (
     ChunkUploadResponse,
     TransferCreateRequest,
@@ -32,6 +33,7 @@ async def create_transfer(
     service: ServiceDep,
 ) -> TransferCreateResponse:
     """Reserve a transfer. The client then uploads ``total_chunks`` chunks."""
+    timing.mark("create.enter", device=device_id[:8], size=payload.size, name=payload.filename[:28])
     transfer = await service.create(
         sender_id=device_id,
         filename=payload.filename,
@@ -39,6 +41,7 @@ async def create_transfer(
         receiver_id=payload.receiver_id,
         mime_type=payload.mime_type,
     )
+    timing.mark("create.return", tid=str(transfer["id"])[:8], chunks=transfer["total_chunks"])
     return TransferCreateResponse(
         transfer_id=transfer["id"],
         chunk_size=transfer["chunk_size"],
@@ -59,6 +62,19 @@ async def upload_chunk(
     Idempotent: re-sending the same index overwrites it, which is what makes
     resume after a dropped connection safe.
     """
+    timing.mark("endpoint.enter", tid=transfer_id[:8], index=index)
+    # How the browser framed the request body. A phone that switches from a
+    # counted body to a streamed one above some size would explain why only
+    # large chunks hang, and nothing else can show that.
+    timing.mark(
+        "request.framing",
+        tid=transfer_id[:8],
+        index=index,
+        length=request.headers.get("content-length", "-"),
+        encoding=request.headers.get("transfer-encoding", "-"),
+        http=request.scope.get("http_version", "-"),
+        conn=request.headers.get("connection", "-"),
+    )
     written, received = await service.write_chunk(
         transfer_id=transfer_id,
         index=index,
@@ -66,6 +82,7 @@ async def upload_chunk(
         stream=request.stream(),
     )
     transfer = await service.get(transfer_id)
+    timing.mark("endpoint.return", tid=transfer_id[:8], index=index, written=written)
     return ChunkUploadResponse(
         transfer_id=transfer_id,
         index=index,
