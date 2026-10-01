@@ -24,6 +24,7 @@ JS = Path(__file__).parent / "js"
 STALL_HARNESS = JS / "upload_stall_harness.mjs"
 FALLBACK_HARNESS = JS / "upload_fallback_harness.mjs"
 TIMEOUT_HARNESS = JS / "request_timeout_harness.mjs"
+PARTICLES_HARNESS = JS / "particles_harness.mjs"
 API_JS = ROOT / "frontend" / "js" / "api.js"
 UPLOAD_JS = ROOT / "frontend" / "js" / "upload.js"
 
@@ -41,7 +42,10 @@ def frontend_as_modules(tmp_path: Path) -> Path:
     into a package, which the no-build-step rule rules out.
     """
     (tmp_path / "package.json").write_text('{"type": "module"}', encoding="utf-8")
-    for source in (API_JS, UPLOAD_JS):
+    # Every module, not a hand-kept list: a harness for a module someone forgot
+    # to add here fails with "cannot find module", which reads like a broken
+    # test rather than a missing copy.
+    for source in sorted((ROOT / "frontend" / "js").glob("*.js")):
         (tmp_path / source.name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
     return tmp_path
 
@@ -78,3 +82,11 @@ def test_a_call_to_a_dead_connection_fails_instead_of_hanging(frontend_as_module
     browser reuses it anyway and will not retry the POST, so without a timeout
     the upload sits on "Starting..." forever and the queue stalls behind it."""
     run_harness(TIMEOUT_HARNESS, frontend_as_modules / API_JS.name)
+
+
+@requires_node
+def test_the_background_animation_behaves(frontend_as_modules: Path) -> None:
+    """Decoration still has to scale its particle count to the screen, honour
+    prefers-reduced-motion, stop when the page is hidden, and not build a
+    colour out of NaN when the theme hands it something unexpected."""
+    run_harness(PARTICLES_HARNESS, frontend_as_modules / "particles.js")

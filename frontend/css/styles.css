@@ -46,6 +46,23 @@
   box-sizing: border-box;
 }
 
+/* -- background animation -------------------------------------------------- */
+
+/*
+ * Behind everything and inert. `z-index: -1` puts it under the panels, which
+ * are opaque (`background: var(--panel)`), so body text keeps its contrast.
+ * `pointer-events: none` matters more than it looks - a fixed full-viewport
+ * element would otherwise swallow every tap on the page.
+ */
+#particle-field {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
 body {
   margin: 0;
   padding: 0 0 env(safe-area-inset-bottom);

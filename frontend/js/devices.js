@@ -15,7 +15,7 @@ import {
   resetIdentity,
   setStoredName,
   setToken,
-} from './api.js?v=11';
+} from './api.js?v=12';
 
 export class DeviceRegistry {
   constructor(onChange) {

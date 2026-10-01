@@ -11,7 +11,7 @@ import {
   createTransfer,
   getTransfer,
   uploadChunk,
-} from './api.js?v=11';
+} from './api.js?v=12';
 
 const MAX_CHUNK_ATTEMPTS = 3;
 const RETRY_BASE_MS = 600;

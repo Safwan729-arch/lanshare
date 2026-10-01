@@ -16,11 +16,12 @@ import {
   listPendingDevices,
   clearHistory,
   listTransfers,
-} from './api.js?v=11';
-import { DeviceRegistry, ensureRegistered, rename } from './devices.js?v=11';
-import { UploadQueue } from './upload.js?v=11';
-import { RealtimeConnection } from './ws.js?v=11';
-import * as ui from './ui.js?v=11';
+} from './api.js?v=12';
+import { DeviceRegistry, ensureRegistered, rename } from './devices.js?v=12';
+import { UploadQueue } from './upload.js?v=12';
+import { RealtimeConnection } from './ws.js?v=12';
+import * as ui from './ui.js?v=12';
+import { start as startParticles } from './particles.js?v=12';
 
 const elements = ui.cacheElements();
 const selfId = getDeviceId();
@@ -173,6 +174,16 @@ for (const type of ['dragleave', 'drop']) {
 elements.dropzone.addEventListener('drop', (dropEvent) => {
   sendFiles(dropEvent.dataTransfer.files);
 });
+
+// Decoration, so it must never be able to break the app it decorates.
+const particleField = document.getElementById('particle-field');
+if (particleField) {
+  try {
+    startParticles(particleField);
+  } catch {
+    // A browser without ResizeObserver or canvas still gets a working app.
+  }
+}
 
 elements['clear-finished'].addEventListener('click', () => queue.clearFinished());
 

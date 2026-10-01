@@ -13,7 +13,7 @@
  * a stale cached page from a current one, and a browser cache turned a fixed
  * bug into a bug that looked unfixed.
  */
-const CLIENT_VERSION = '11';
+const CLIENT_VERSION = '12';
 
 const DEVICE_ID_KEY = 'lanshare.device_id';
 const DEVICE_NAME_KEY = 'lanshare.device_name';
