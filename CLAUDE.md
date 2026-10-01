@@ -110,8 +110,11 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 
-# Run (dev)
-uvicorn lanshare.main:app --host 0.0.0.0 --port 8080 --reload --app-dir server
+# Run (normal) - applies every setting, including the idle-connection window
+python -m lanshare
+
+# Run (dev, auto-reload). --timeout-keep-alive is NOT optional: see the warning below.
+uvicorn lanshare.main:app --host 0.0.0.0 --port 8080 --reload --app-dir server --timeout-keep-alive 120
 
 # Test / lint / format
 pytest
@@ -119,6 +122,13 @@ ruff check .
 ruff format .
 ```
 The server must print the LAN URL (e.g. `http://192.168.1.20:8080`) and show a QR code on startup.
+
+> **Do not run a bare `uvicorn` command.** Its `--timeout-keep-alive` defaults to 5
+> seconds, which is shorter than it takes a person to pick a video out of a phone's
+> gallery. The browser reuses the connection the server has already closed, and because
+> a `POST` is never retried automatically, the transfer hangs on "Starting…" with no
+> error. `python -m lanshare` reads `keep_alive_timeout` from settings and gets this
+> right; a bare uvicorn command does not. See `vault/03-Decisions/ADR-0011`.
 
 ---
 
