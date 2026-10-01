@@ -15,11 +15,11 @@ import {
   listPeers,
   listPendingDevices,
   listTransfers,
-} from './api.js';
-import { DeviceRegistry, ensureRegistered, rename } from './devices.js';
-import { UploadQueue } from './upload.js';
-import { RealtimeConnection } from './ws.js';
-import * as ui from './ui.js';
+} from './api.js?v=10';
+import { DeviceRegistry, ensureRegistered, rename } from './devices.js?v=10';
+import { UploadQueue } from './upload.js?v=10';
+import { RealtimeConnection } from './ws.js?v=10';
+import * as ui from './ui.js?v=10';
 
 const elements = ui.cacheElements();
 const selfId = getDeviceId();

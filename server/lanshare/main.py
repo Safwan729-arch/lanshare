@@ -13,9 +13,12 @@ from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
+from starlette.responses import Response
+from starlette.types import Scope
 
-from . import __version__
+from . import __version__, timing
 from .api import devices as devices_api
+from .api import diag as diag_api
 from .api import files as files_api
 from .api import health as health_api
 from .api import peers as peers_api
@@ -42,6 +45,26 @@ SERVER_DEVICE_KEY = "server_device_id"
 #: Sec-WebSocket-Protocol without it landing in uvicorn's access log.
 WS_SUBPROTOCOL = "lanshare.v1"
 TOKEN_SUBPROTOCOL_PREFIX = "token."
+
+
+class RevalidatingStaticFiles(StaticFiles):
+    """Serve the frontend with `Cache-Control: no-cache`.
+
+    Starlette sends an ETag and Last-Modified but no Cache-Control at all, which
+    leaves the browser free to invent a freshness lifetime of its own. Safari
+    does exactly that, so a phone can keep running JavaScript from before the
+    server was updated - reloading the page changes nothing and there is no way
+    for the user to tell. That cost a full debugging round here.
+
+    `no-cache` does not mean "do not store": the ETag still makes a revalidation
+    a cheap 304. It means "ask before reusing", which is what a self-hosted app
+    that gets edited between sessions actually needs.
+    """
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers.setdefault("Cache-Control", "no-cache")
+        return response
 
 
 async def _ensure_server_device(app: FastAPI) -> str:
@@ -226,13 +249,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(transfers_api.router, prefix="/api")
     app.include_router(files_api.router, prefix="/api")
     app.include_router(peers_api.router, prefix="/api")
+    if timing.enabled():
+        # Diagnostics only exist while stage timing is switched on.
+        app.include_router(diag_api.router, prefix="/api")
 
     _register_websocket(app)
 
     # Mounted last so it never shadows /api.
     frontend_dir = app.state.settings.frontend_dir
     if frontend_dir.is_dir():
-        app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+        app.mount("/", RevalidatingStaticFiles(directory=frontend_dir, html=True), name="frontend")
     else:  # pragma: no cover - only hit if the checkout is incomplete
         logger.warning("No frontend directory at %s", frontend_dir)
 

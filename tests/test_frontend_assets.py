@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 
 import pytest
+from httpx import AsyncClient
 
 FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
 HTML = FRONTEND / "index.html"
@@ -162,3 +163,68 @@ def test_the_download_helper_sends_the_credential(api_js: str) -> None:
     helper = re.search(r"export async function downloadFile.*?\n}", api_js, re.S)
     assert helper is not None
     assert "deviceHeaders()" in helper.group(0)
+
+
+# -- the phone must not be able to run stale code ----------------------------
+
+
+def test_the_client_announces_its_version(api_js: str) -> None:
+    """A browser cache turned a fixed bug into a bug that looked unfixed.
+
+    Starlette serves the frontend with an ETag but no Cache-Control, so Safari
+    invents its own freshness lifetime and a reload can change nothing. Riding
+    a version marker along in the registered user agent is what makes "is the
+    phone running the new code?" answerable from the server.
+    """
+    assert re.search(r"const CLIENT_VERSION = '[^']+'", api_js), "api.js must define CLIENT_VERSION"
+
+    register = re.search(r"export function registerDevice.*?\n}", api_js, re.S)
+    assert register is not None
+    assert "CLIENT_VERSION" in register.group(0), (
+        "registerDevice must send the client version, or the server cannot tell "
+        "a stale cached page from a current one"
+    )
+
+
+async def test_the_frontend_is_served_with_revalidation(client: AsyncClient) -> None:
+    """`no-cache` means "ask first", not "do not store" - the ETag keeps it cheap."""
+    for path in ("/", "/js/api.js", "/css/styles.css"):
+        response = await client.get(path)
+        assert response.status_code == 200, f"{path} -> {response.status_code}"
+        assert "no-cache" in response.headers.get("cache-control", ""), (
+            f"{path} was served without Cache-Control: no-cache, so a phone may "
+            f"keep running the previous build with no way to notice"
+        )
+
+
+def test_every_module_url_carries_the_same_version(api_js: str, html: str) -> None:
+    """Versioned URLs are the only way to force a cache miss without a build step.
+
+    Safari cached the frontend under a heuristic lifetime of its own invention
+    and then would not even revalidate, so a fix could not reach the phone:
+    adding `Cache-Control` did not help, because the browser never asked. A new
+    URL it has to fetch.
+
+    They must all agree. Two importers asking for `api.js` under different
+    versions would give them two separate module instances of it.
+    """
+    versions = set()
+    sources = {"index.html": html}
+    for path in sorted((FRONTEND / "js").glob("*.js")):
+        sources[path.name] = path.read_text(encoding="utf-8")
+
+    unversioned = []
+    for name, source in sources.items():
+        versions.update(re.findall(r"\?v=(\d+)", source))
+        # An import that forgot the version pins that module to the old cache.
+        unversioned += [f"{name}: {spec}" for spec in re.findall(r"from '(\./[a-z]+\.js)'", source)]
+
+    assert unversioned == [], f"these imports would still be served from cache: {unversioned}"
+    assert len(versions) == 1, f"module URLs disagree on the version: {sorted(versions)}"
+
+    declared = re.search(r"const CLIENT_VERSION = '([^']+)'", api_js)
+    assert declared is not None
+    assert declared.group(1) == versions.pop(), (
+        "CLIENT_VERSION must match the asset version, or the build a device "
+        "reports is not the build it is running"
+    )
