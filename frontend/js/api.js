@@ -13,7 +13,7 @@
  * a stale cached page from a current one, and a browser cache turned a fixed
  * bug into a bug that looked unfixed.
  */
-const CLIENT_VERSION = '10';
+const CLIENT_VERSION = '11';
 
 const DEVICE_ID_KEY = 'lanshare.device_id';
 const DEVICE_NAME_KEY = 'lanshare.device_name';
@@ -241,6 +241,20 @@ export function cancelTransfer(transferId) {
 export function listTransfers(limit = 25) {
   // No device_id parameter: the server scopes history to the caller.
   return request(`/api/transfers?limit=${limit}`, { headers: deviceHeaders() });
+}
+
+/**
+ * Forget this device's finished transfers.
+ *
+ * The server scopes this to the caller, so there is nothing to pass. Note the
+ * row is shared with the other device in each transfer, which loses those
+ * entries from its history too.
+ */
+export function clearHistory() {
+  return request('/api/transfers', {
+    method: 'DELETE',
+    headers: deviceHeaders(),
+  });
 }
 
 export function listPeers() {

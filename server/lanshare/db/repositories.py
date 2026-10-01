@@ -266,6 +266,31 @@ class TransferRepository:
             return _rows(await cur.fetchall())
 
     @staticmethod
+    async def clear_history(
+        conn: aiosqlite.Connection, *, device_id: str, active: tuple[str, ...]
+    ) -> list[str]:
+        """Delete this device's finished transfers. Returns the ids removed.
+
+        Scoped the same way as ``history``: a device clears only rows it is a
+        party to. Transfers still running are left alone - deleting one would
+        make its next chunk 404 and strand the partial chunks on disk.
+
+        The ids come back so the caller can clean up anything on disk that only
+        the row knew about.
+        """
+        placeholders = ", ".join("?" * len(active))
+        query = f"""
+            DELETE FROM transfers
+            WHERE (sender_id = ? OR receiver_id = ?)
+              AND status NOT IN ({placeholders})
+            RETURNING id
+        """
+        async with conn.execute(query, (device_id, device_id, *active)) as cur:
+            removed = [str(row[0]) for row in await cur.fetchall()]
+        await conn.commit()
+        return removed
+
+    @staticmethod
     async def set_status(
         conn: aiosqlite.Connection, transfer_id: str, status: str, *, error: str | None = None
     ) -> None:

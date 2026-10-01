@@ -21,7 +21,8 @@ export function cacheElements() {
     'clear-finished',
     'incoming-panel',
     'incoming-list',
-    'history-list',
+    'clear-history',
+  'history-list',
     'history-empty',
     'toast',
     'server-hint',
@@ -233,6 +234,7 @@ export function renderHistory(transfers, selfId, onDownload) {
   const list = elements['history-list'];
   list.replaceChildren();
   elements['history-empty'].hidden = transfers.length > 0;
+  elements['clear-history'].hidden = transfers.length === 0;
 
   for (const transfer of transfers) {
     const row = element('li', 'history-row');

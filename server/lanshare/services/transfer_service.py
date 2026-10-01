@@ -328,6 +328,21 @@ class TransferService:
     async def history(self, *, device_id: str | None, limit: int) -> list[dict[str, Any]]:
         return await TransferRepository.history(self._conn, device_id=device_id, limit=limit)
 
+    async def clear_history(self, *, device_id: str) -> int:
+        """Forget this device's finished transfers. Returns how many went.
+
+        Received files are deliberately untouched: this clears a list, and a
+        list is not the files. Partial chunks are a different matter - once the
+        row is gone nothing can find its temp directory again, so the directory
+        goes with it.
+        """
+        removed = await TransferRepository.clear_history(
+            self._conn, device_id=device_id, active=tuple(sorted(ACTIVE_STATUSES))
+        )
+        for transfer_id in removed:
+            self._storage.cleanup(transfer_id)
+        return len(removed)
+
     # -- download ------------------------------------------------------------
 
     async def resolve_download(

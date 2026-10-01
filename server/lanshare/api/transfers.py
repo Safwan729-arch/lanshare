@@ -9,6 +9,7 @@ from fastapi import APIRouter, Path, Query, Request
 from .. import timing
 from ..models import (
     ChunkUploadResponse,
+    ClearHistoryResponse,
     TransferCreateRequest,
     TransferCreateResponse,
     TransferListResponse,
@@ -124,6 +125,29 @@ async def cancel_transfer(
 ) -> TransferResponse:
     """Cancel an in-flight transfer and delete its partial chunks."""
     return _response(service, await service.cancel(transfer_id=transfer_id, device_id=device_id))
+
+
+@router.delete("", response_model=ClearHistoryResponse)
+async def clear_history(
+    device_id: DeviceIdDep,
+    service: ServiceDep,
+) -> ClearHistoryResponse:
+    """Forget this device's finished transfers.
+
+    Scoped to the caller, exactly like the history it clears - there is no
+    device_id parameter, so no device can clear another's.
+
+    Two things this deliberately does not do. It does not delete received
+    files: clearing a list should not destroy what the transfers delivered.
+    And it does not touch a transfer still running, which would 404 its next
+    chunk and leave its chunks stranded.
+
+    One consequence worth knowing: a transfer row is shared by its sender and
+    its receiver, so clearing here also removes those entries from the other
+    device's history.
+    """
+    deleted = await service.clear_history(device_id=device_id)
+    return ClearHistoryResponse(deleted=deleted)
 
 
 @router.get("", response_model=TransferListResponse)

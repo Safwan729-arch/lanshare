@@ -14,12 +14,13 @@ import {
   getToken,
   listPeers,
   listPendingDevices,
+  clearHistory,
   listTransfers,
-} from './api.js?v=10';
-import { DeviceRegistry, ensureRegistered, rename } from './devices.js?v=10';
-import { UploadQueue } from './upload.js?v=10';
-import { RealtimeConnection } from './ws.js?v=10';
-import * as ui from './ui.js?v=10';
+} from './api.js?v=11';
+import { DeviceRegistry, ensureRegistered, rename } from './devices.js?v=11';
+import { UploadQueue } from './upload.js?v=11';
+import { RealtimeConnection } from './ws.js?v=11';
+import * as ui from './ui.js?v=11';
 
 const elements = ui.cacheElements();
 const selfId = getDeviceId();
@@ -174,6 +175,18 @@ elements.dropzone.addEventListener('drop', (dropEvent) => {
 });
 
 elements['clear-finished'].addEventListener('click', () => queue.clearFinished());
+
+// Confirmed because it cannot be undone, and because the entries disappear
+// from the other device's history too - worth knowing before you agree.
+elements['clear-history'].addEventListener('click', async () => {
+  if (!confirm('Clear the transfer history? Files already received are kept.')) return;
+  try {
+    await clearHistory();
+  } catch (error) {
+    ui.toast(`Could not clear the history: ${error.message}`, 'error');
+  }
+  await refreshHistory();
+});
 
 // -- identity ----------------------------------------------------------------
 

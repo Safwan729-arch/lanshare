@@ -107,6 +107,12 @@ class TransferCreateRequest(BaseModel):
     mime_type: Annotated[str | None, Field(default=None, max_length=255)] = None
 
 
+class ClearHistoryResponse(BaseModel):
+    """How many transfers the caller just forgot."""
+
+    deleted: int
+
+
 class TransferCreateResponse(BaseModel):
     transfer_id: str
     chunk_size: int
