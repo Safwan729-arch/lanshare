@@ -336,6 +336,30 @@ class TransferRepository:
         await conn.commit()
 
     @staticmethod
+    async def set_status_if(
+        conn: aiosqlite.Connection,
+        transfer_id: str,
+        *,
+        expected: str,
+        status: str,
+        error: str | None = None,
+    ) -> bool:
+        """Change status only if the row is still where the caller thinks it is.
+
+        Returns whether it moved. Two host pages can answer the same request in
+        the same moment, and a timer can expire one while a person is answering
+        it: all of them read `awaiting` before any of them writes. Letting the
+        database decide the winner is the only way the loser can be told it lost.
+        """
+        async with conn.execute(
+            "UPDATE transfers SET status = ?, error = ? WHERE id = ? AND status = ?",
+            (status, error, transfer_id, expected),
+        ) as cursor:
+            moved = cursor.rowcount > 0
+        await conn.commit()
+        return moved
+
+    @staticmethod
     async def mark_completed(
         conn: aiosqlite.Connection, transfer_id: str, *, sha256: str, stored_name: str
     ) -> None:

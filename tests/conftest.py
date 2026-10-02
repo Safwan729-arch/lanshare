@@ -158,3 +158,29 @@ async def send_file(
         assert upload.status_code == 200, upload.text
 
     return transfer_id
+
+
+class FakeSocket:
+    """A stand-in for a browser's WebSocket.
+
+    The suite talks HTTP, so no test device is ever "connected". Registering one
+    of these is how a test says "this device has its page open", and it doubles
+    as a record of what the server sent there.
+    """
+
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+        self.closed = False
+
+    async def send_json(self, message: dict) -> None:
+        self.sent.append(message)
+
+    async def close(self, code: int = 1000, reason: str = "") -> None:
+        self.closed = True
+
+
+def bring_online(app, device_id: str) -> FakeSocket:
+    """Give a device a connection, as if its page were open."""
+    socket = FakeSocket()
+    app.state.connections.add(device_id, socket)
+    return socket

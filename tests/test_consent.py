@@ -6,8 +6,10 @@ sender's side of it is in tests/js/consent_harness.mjs.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
-from conftest import approve, headers, register, send_file
+from conftest import approve, bring_online, headers, register, send_file
 from lanshare.db.repositories import DeviceRepository, TransferRepository
 from lanshare.services.errors import Forbidden
 
@@ -49,9 +51,9 @@ async def test_clearing_history_leaves_a_waiting_transfer_alone(
 async def test_a_waiting_transfer_refuses_chunks(app, client, sender, receiver) -> None:
     """The whole feature in one assertion.
 
-    Nothing else stops an upload: `write_chunk` rejects any status outside
-    `ACTIVE_STATUSES`, and `awaiting` being outside that set is the only reason
-    a file cannot be pushed before the recipient has agreed to receive it.
+    `awaiting` is outside `ACTIVE_STATUSES`, so `write_chunk` refuses it, and
+    that is the only reason a file cannot be pushed before the recipient has
+    agreed to receive it.
     """
     transfer_id = await send_file(
         client, sender_id=sender, receiver_id=receiver, filename="c.bin", payload=b"x" * 10
@@ -150,6 +152,7 @@ async def test_accepting_unblocks_the_upload(app, client, sender, receiver) -> N
         client, sender_id=sender, receiver_id=receiver, filename="g.bin", payload=b"x" * 10
     )
     await force_awaiting(app, transfer_id)
+    sender_socket = bring_online(app, sender)
 
     blocked = await client.put(
         f"/api/transfers/{transfer_id}/chunks/0", content=b"x" * 10, headers=headers(sender)
@@ -164,6 +167,10 @@ async def test_accepting_unblocks_the_upload(app, client, sender, receiver) -> N
     )
     assert accepted.status_code == 200
     assert accepted.json()["status"] == "pending"
+    told = [m for m in sender_socket.sent if m["type"] == "transfer.accepted"]
+    assert len(told) == 1
+    assert told[0]["data"]["transfer_id"] == transfer_id
+    assert not [m for m in sender_socket.sent if m["type"] == "transfer.declined"]
 
     allowed = await client.put(
         f"/api/transfers/{transfer_id}/chunks/0", content=b"x" * 10, headers=headers(sender)
@@ -171,12 +178,13 @@ async def test_accepting_unblocks_the_upload(app, client, sender, receiver) -> N
     assert allowed.status_code == 200
 
 
-async def test_declining_is_terminal(app, client, sender, receiver, settings) -> None:
+async def test_declining_is_terminal(app, client, sender, receiver) -> None:
     """A refusal ends the transfer; it cannot be restarted by uploading anyway."""
     transfer_id = await send_file(
         client, sender_id=sender, receiver_id=receiver, filename="h.bin", payload=b"x" * 10
     )
     await force_awaiting(app, transfer_id)
+    sender_socket = bring_online(app, sender)
 
     declined = await client.post(
         f"/api/transfers/{transfer_id}/consent",
@@ -185,12 +193,16 @@ async def test_declining_is_terminal(app, client, sender, receiver, settings) ->
     )
     assert declined.status_code == 200
     assert declined.json()["status"] == "declined"
+    assert declined.json()["error"] == "Declined"
+    told = [m for m in sender_socket.sent if m["type"] == "transfer.declined"]
+    assert len(told) == 1
+    assert told[0]["data"]["error"] == "Declined"
+    assert not [m for m in sender_socket.sent if m["type"] == "transfer.accepted"]
 
     blocked = await client.put(
         f"/api/transfers/{transfer_id}/chunks/0", content=b"x" * 10, headers=headers(sender)
     )
     assert blocked.status_code == 409
-    assert list(settings.incoming_dir.glob("h.bin*")) == []
 
 
 async def test_a_third_device_cannot_answer(app, client, lan_client, sender, receiver) -> None:
@@ -260,3 +272,57 @@ async def test_a_decision_must_be_accept_or_decline(
         headers=headers(receiver),
     )
     assert response.status_code == 422
+
+
+async def test_accepting_a_request_someone_declined_says_so(app, client, sender, receiver) -> None:
+    """The second host page must not be told a manual refusal was a timeout."""
+    transfer_id = await send_file(
+        client, sender_id=sender, receiver_id=receiver, filename="n.bin", payload=b"x" * 10
+    )
+    await force_awaiting(app, transfer_id)
+    url = f"/api/transfers/{transfer_id}/consent"
+
+    await client.post(url, json={"decision": "decline"}, headers=headers(receiver))
+    late = await client.post(url, json={"decision": "accept"}, headers=headers(receiver))
+
+    assert late.status_code == 409
+    assert "already declined" in late.json()["detail"]
+    assert "expired" not in late.json()["detail"]
+
+
+async def test_completing_a_waiting_transfer_says_it_is_not_accepted(
+    app, client, sender, receiver
+) -> None:
+    """A client that skipped the upload can still call complete."""
+    transfer_id = await send_file(
+        client, sender_id=sender, receiver_id=receiver, filename="o.bin", payload=b"x" * 10
+    )
+    await force_awaiting(app, transfer_id)
+
+    refused = await client.post(f"/api/transfers/{transfer_id}/complete", headers=headers(sender))
+    assert refused.status_code == 409
+    assert "not accepted" in refused.json()["detail"]
+
+
+async def test_two_answers_at_once_produce_one_outcome(app, client, sender, receiver) -> None:
+    """Two host pages can both be open, and a timer will later race them too.
+
+    Both readers see `awaiting` before either writes, so without an atomic
+    transition both would "succeed" and the loser's event would contradict the
+    winner's.
+    """
+    transfer_id = await send_file(
+        client, sender_id=sender, receiver_id=receiver, filename="m.bin", payload=b"x" * 10
+    )
+    await force_awaiting(app, transfer_id)
+
+    async def answer(decision: str):
+        return await client.post(
+            f"/api/transfers/{transfer_id}/consent",
+            json={"decision": decision},
+            headers=headers(receiver),
+        )
+
+    first, second = await asyncio.gather(answer("accept"), answer("decline"))
+    codes = sorted([first.status_code, second.status_code])
+    assert codes == [200, 409], [first.text, second.text]

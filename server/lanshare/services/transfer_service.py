@@ -32,9 +32,8 @@ logger = logging.getLogger(__name__)
 #: A transfer whose chunks may flow right now.
 ACTIVE_STATUSES = {"pending", "uploading"}
 
-#: Waiting for the recipient to accept. Deliberately *not* in ACTIVE_STATUSES:
-#: `write_chunk` and `_complete` refuse anything outside that set, which is what
-#: blocks the upload without a guard of their own.
+#: Waiting for the recipient to accept. Deliberately *not* in ACTIVE_STATUSES,
+#: so the upload paths refuse it, and they say so in words a sender can act on.
 AWAITING = "awaiting"
 
 #: Live, meaning a decision or an upload is still in progress. Wider than
@@ -261,30 +260,45 @@ class TransferService:
 
         if transfer["status"] != AWAITING:
             if transfer["status"] == "declined":
-                raise Conflict("That request has expired")
+                if transfer["error"] == "No answer":
+                    raise Conflict("That request has expired")
+                raise Conflict("That request was already declined")
             raise Conflict("Transfer is " + transfer["status"])
 
         if accept:
-            await TransferRepository.set_status(self._conn, transfer_id, "pending")
+            moved = await TransferRepository.set_status_if(
+                self._conn, transfer_id, expected=AWAITING, status="pending"
+            )
+            if not moved:
+                raise Conflict("That request was already answered")
             await self._notify(
                 transfer, event("transfer.accepted", transfer_id=transfer_id, by=device_id)
             )
             logger.info("Transfer %s accepted by %s", transfer_id, device_id)
-        else:
-            await self._decline(transfer, reason="Declined", by=device_id)
+        elif not await self._decline(transfer, reason="Declined", by=device_id):
+            raise Conflict("That request was already answered")
 
         return await self._require(transfer_id)
 
     async def _decline(
         self, transfer: dict[str, Any], *, reason: str, by: str | None = None
-    ) -> None:
-        """Refuse a waiting transfer. Nothing is on disk yet, so nothing is deleted."""
-        await TransferRepository.set_status(self._conn, transfer["id"], "declined", error=reason)
+    ) -> bool:
+        """Refuse a waiting transfer. Nothing is on disk yet, so nothing is deleted.
+
+        Returns False when someone else answered first, so a timer can ignore
+        the loss quietly while `consent` turns it into an error.
+        """
+        moved = await TransferRepository.set_status_if(
+            self._conn, transfer["id"], expected=AWAITING, status="declined", error=reason
+        )
+        if not moved:
+            return False
         await self._notify(
             transfer,
-            event("transfer.declined", transfer_id=transfer["id"], reason=reason, by=by),
+            event("transfer.declined", transfer_id=transfer["id"], error=reason, by=by),
         )
         logger.info("Transfer %s declined (%s)", transfer["id"], reason)
+        return True
 
     async def get(self, transfer_id: str, *, device_id: str | None = None) -> dict[str, Any]:
         transfer = await self._require(transfer_id)
