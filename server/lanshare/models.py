@@ -33,7 +33,9 @@ def is_sendable_media_type(value: str | None) -> bool:
     return value is not None and _MEDIA_TYPE.match(value) is not None
 
 
-TransferStatus = Literal["pending", "uploading", "completed", "failed", "cancelled"]
+TransferStatus = Literal[
+    "awaiting", "pending", "uploading", "completed", "failed", "cancelled", "declined"
+]
 TrustState = Literal["pending", "trusted", "blocked"]
 
 

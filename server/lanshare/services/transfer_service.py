@@ -29,7 +29,18 @@ from .storage import Storage, StorageError, sanitize_filename
 
 logger = logging.getLogger(__name__)
 
+#: A transfer whose chunks may flow right now.
 ACTIVE_STATUSES = {"pending", "uploading"}
+
+#: Waiting for the recipient to accept. Deliberately *not* in ACTIVE_STATUSES:
+#: `write_chunk` and `_complete` refuse anything outside that set, which is what
+#: blocks the upload without a guard of their own.
+AWAITING = "awaiting"
+
+#: Live, meaning a decision or an upload is still in progress. Wider than
+#: ACTIVE_STATUSES because a transfer waiting for consent can be cancelled by
+#: its sender and must not be deleted by a history clear.
+LIVE_STATUSES = ACTIVE_STATUSES | {AWAITING}
 
 #: How many chunks a transfer may be split into before the chunk size grows.
 #:
@@ -336,7 +347,7 @@ class TransferService:
         transfer = await self._require(transfer_id)
         if device_id not in (transfer["sender_id"], transfer["receiver_id"]):
             raise Forbidden("Only the sender or receiver may cancel a transfer")
-        if transfer["status"] not in ACTIVE_STATUSES:
+        if transfer["status"] not in LIVE_STATUSES:
             raise Conflict("Transfer is already " + transfer["status"])
 
         await TransferRepository.set_status(self._conn, transfer_id, "cancelled")
@@ -359,7 +370,7 @@ class TransferService:
         goes with it.
         """
         removed = await TransferRepository.clear_history(
-            self._conn, device_id=device_id, active=tuple(sorted(ACTIVE_STATUSES))
+            self._conn, device_id=device_id, active=tuple(sorted(LIVE_STATUSES))
         )
         for transfer_id in removed:
             # rmtree is blocking, and clearing a long history is many of them.
