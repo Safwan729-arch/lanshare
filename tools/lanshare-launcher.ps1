@@ -87,7 +87,9 @@ Write-Step 'starting the server'
 # the thing people lose. The interpreter and its arguments are unchanged, so the
 # ADR-0011 rule above still holds - `title` runs and exits, then python -m runs.
 Start-Process -FilePath $env:ComSpec -WorkingDirectory $root -ArgumentList @(
-    '/c', 'title LANShare server &', "`"$python`"", '-m', 'lanshare'
+    # No space before the `&`: cmd's `title` takes the rest of its command, so
+    # a space there ends up in the window title.
+    '/c', 'title LANShare server&', "`"$python`"", '-m', 'lanshare'
 )
 
 # Startup does real work - schema migrations, mDNS, the QR - so this waits
