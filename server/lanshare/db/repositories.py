@@ -12,6 +12,8 @@ from typing import Any
 
 import aiosqlite
 
+from ..services.auth import TRUSTED, is_host_device
+
 
 def utc_now() -> str:
     """Timestamps are ISO-8601 UTC strings so SQLite can sort them lexically."""
@@ -187,6 +189,18 @@ class DeviceRepository:
     async def list_all(conn: aiosqlite.Connection) -> list[dict[str, Any]]:
         async with conn.execute("SELECT * FROM devices ORDER BY name COLLATE NOCASE") as cur:
             return _rows(await cur.fetchall())
+
+    @staticmethod
+    async def list_hosts(conn: aiosqlite.Connection) -> list[dict[str, Any]]:
+        """Trusted devices that are the host machine itself.
+
+        The loopback test is a Python one rather than SQL because
+        `first_address` holds an address, not a flag, and `is_host_device` is the
+        single place that decides what counts. The table is tiny - one row per
+        browser that has ever paired - so the scan is not worth optimising.
+        """
+        rows = await DeviceRepository.list_by_trust(conn, TRUSTED)
+        return [row for row in rows if is_host_device(row)]
 
     @staticmethod
     async def rename(conn: aiosqlite.Connection, device_id: str, name: str) -> None:

@@ -6,8 +6,8 @@ sender's side of it is in tests/js/consent_harness.mjs.
 
 from __future__ import annotations
 
-from conftest import headers, send_file
-from lanshare.db.repositories import TransferRepository
+from conftest import approve, headers, register, send_file
+from lanshare.db.repositories import DeviceRepository, TransferRepository
 
 
 async def force_awaiting(app, transfer_id: str) -> None:
@@ -60,3 +60,16 @@ async def test_a_waiting_transfer_refuses_chunks(app, client, sender, receiver) 
         f"/api/transfers/{transfer_id}/chunks/0", content=b"x" * 10, headers=headers(sender)
     )
     assert refused.status_code == 409
+
+
+async def test_the_repository_can_list_host_devices(app, client, lan_client, sender) -> None:
+    """The service needs this and must not reach into `api/` to get it."""
+    phone = await register(lan_client, "Phone")
+    await approve(client, sender, phone)
+
+    hosts = await DeviceRepository.list_hosts(app.state.database.connection)
+    ids = [row["id"] for row in hosts]
+
+    assert sender in ids, "a browser registered from loopback is the host"
+    assert app.state.server_device_id in ids, "the server's own row is the host"
+    assert phone not in ids

@@ -24,7 +24,6 @@ from ..services.auth import (
     generate_token,
     hash_token,
     initial_trust_state,
-    is_host_device,
     verify_token,
 )
 from ..services.errors import Forbidden, NotFound, TooManyRequests
@@ -249,8 +248,7 @@ async def _pending_event(conn: aiosqlite.Connection) -> dict[str, Any]:
 
 async def host_device_ids(conn: aiosqlite.Connection) -> list[str]:
     """Which devices are the host machine itself."""
-    rows = await DeviceRepository.list_by_trust(conn, TRUSTED)
-    return [str(row["id"]) for row in rows if is_host_device(row)]
+    return [str(row["id"]) for row in await DeviceRepository.list_hosts(conn)]
 
 
 async def _notify_hosts(request: Request, message: dict[str, Any]) -> None:
