@@ -9,14 +9,14 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from conftest import approve, bring_online, headers, register, send_file
+from conftest import approve, bring_online, headers, online, register, send_file
 from lanshare.db.repositories import DeviceRepository, TransferRepository
 from lanshare.services.errors import Forbidden
 
 
 async def force_awaiting(app, transfer_id: str) -> None:
-    """`create` still starts a transfer as `pending`, so put one into `awaiting`
-    directly to test the guards on their own."""
+    """Put a transfer that `send_file` already accepted back into `awaiting`,
+    to test the guards on their own."""
     connection = app.state.database.connection
     await TransferRepository.set_status(connection, transfer_id, "awaiting")
 
@@ -326,3 +326,61 @@ async def test_two_answers_at_once_produce_one_outcome(app, client, sender, rece
     first, second = await asyncio.gather(answer("accept"), answer("decline"))
     codes = sorted([first.status_code, second.status_code])
     assert codes == [200, 409], [first.text, second.text]
+
+
+async def test_a_new_transfer_waits_for_the_recipient(app, client, sender, receiver) -> None:
+    """The feature, in one test: no bytes until someone says yes."""
+    created = await client.post(
+        "/api/transfers",
+        json={"filename": "n.bin", "size": 10, "receiver_id": receiver},
+        headers=headers(sender),
+    )
+    assert created.status_code == 201
+    assert created.json()["status"] == "awaiting"
+
+    blocked = await client.put(
+        f"/api/transfers/{created.json()['transfer_id']}/chunks/0",
+        content=b"x" * 10,
+        headers=headers(sender),
+    )
+    assert blocked.status_code == 409
+
+
+async def test_sending_to_a_device_that_is_not_there_is_refused(app, client, sender) -> None:
+    """Nothing is created, so there is nothing to clean up afterwards."""
+    absent = await register(client, "A phone with no page open")
+    # registered over loopback, so trusted, but no socket: nobody can answer
+    created = await client.post(
+        "/api/transfers",
+        json={"filename": "o.bin", "size": 10, "receiver_id": absent},
+        headers=headers(sender),
+    )
+    assert created.status_code == 409
+    assert "isn't connected" in created.json()["detail"]
+    assert (await client.get("/api/transfers", headers=headers(sender))).json()["transfers"] == []
+
+
+async def test_a_file_for_the_pc_reaches_the_host_page(app, client, lan_client, sender) -> None:
+    """The server's row holds no socket; the host's page must hear instead.
+
+    Sent from a LAN phone on purpose. The sender is left out of the
+    `transfer.incoming` audience (you do not need telling about your own
+    send), and a loopback sender *is* the host page, so with one the host would
+    correctly hear nothing and the test could not tell a working route from a
+    broken one.
+    """
+    host_page = online(sender)  # the loopback browser *is* the host page
+    phone = await register(lan_client, "Phone")
+    await approve(client, sender, phone)
+    online(phone)
+
+    created = await lan_client.post(
+        "/api/transfers",
+        json={"filename": "p.bin", "size": 10, "receiver_id": app.state.server_device_id},
+        headers=headers(phone),
+    )
+    assert created.status_code == 201
+    assert created.json()["status"] == "awaiting"
+    incoming = [m for m in host_page.sent if m["type"] == "transfer.incoming"]
+    assert len(incoming) == 1
+    assert incoming[0]["data"]["status"] == "awaiting"

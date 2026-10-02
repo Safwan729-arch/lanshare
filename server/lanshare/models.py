@@ -157,6 +157,7 @@ class TransferCreateResponse(BaseModel):
     transfer_id: str
     chunk_size: int
     total_chunks: int
+    status: TransferStatus = "awaiting"
 
 
 class TransferResponse(BaseModel):

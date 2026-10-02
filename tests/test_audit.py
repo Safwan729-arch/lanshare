@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from conftest import LOOPBACK_CLIENT, approve, headers, register, send_file
+from conftest import LOOPBACK_CLIENT, accept, approve, headers, register, send_file
 from httpx import ASGITransport, AsyncClient
 from lanshare.api.devices import host_device_ids
 from lanshare.config import Settings
@@ -143,6 +143,7 @@ async def test_two_uploads_of_one_chunk_do_not_corrupt_it(client, sender, receiv
         headers=headers(sender),
     )
     transfer_id = created.json()["transfer_id"]
+    await accept(transfer_id, receiver)
 
     async def put(fill: bytes):
         return await client.put(
@@ -426,9 +427,7 @@ async def test_clearing_history_does_not_block_the_event_loop(app, client, sende
 
 
 @pytest.mark.asyncio
-async def test_a_trusted_phone_cannot_approve_another_device(
-    client, lan_client, sender
-) -> None:
+async def test_a_trusted_phone_cannot_approve_another_device(client, lan_client, sender) -> None:
     """Approval grants everything, so one approval must not beget the next.
 
     Being trusted used to be enough to approve. A phone that had been approved
@@ -543,6 +542,7 @@ async def complete_with_hash(client, sender, receiver, payload: bytes, sha256: s
     if created.status_code != 201:
         return created, None
     transfer_id = created.json()["transfer_id"]
+    await accept(transfer_id, receiver)
     chunk_size = created.json()["chunk_size"]
     for index in range(created.json()["total_chunks"]):
         await client.put(

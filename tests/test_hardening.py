@@ -16,7 +16,15 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-from conftest import LAN_CLIENT, LOOPBACK_CLIENT, TEST_CHUNK_SIZE, headers, register, send_file
+from conftest import (
+    LAN_CLIENT,
+    LOOPBACK_CLIENT,
+    TEST_CHUNK_SIZE,
+    accept,
+    headers,
+    register,
+    send_file,
+)
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from lanshare.config import Settings
@@ -131,6 +139,7 @@ async def test_an_oversized_chunk_is_refused(
         headers=headers(sender),
     )
     transfer_id = response.json()["transfer_id"]
+    await accept(transfer_id, receiver)
 
     upload = await client.put(
         f"/api/transfers/{transfer_id}/chunks/0",

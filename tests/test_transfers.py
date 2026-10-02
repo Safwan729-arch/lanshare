@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from conftest import TEST_CHUNK_SIZE, headers, send_file
+from conftest import TEST_CHUNK_SIZE, accept, headers, send_file
 from httpx import AsyncClient
 from lanshare.config import Settings
 
@@ -109,6 +109,7 @@ async def test_short_chunk_is_rejected_and_discarded(
         headers=headers(sender),
     )
     transfer_id = response.json()["transfer_id"]
+    await accept(transfer_id, receiver)
 
     bad = await client.put(
         f"/api/transfers/{transfer_id}/chunks/0",
@@ -128,6 +129,7 @@ async def test_chunk_index_out_of_range(client: AsyncClient, sender: str, receiv
         headers=headers(sender),
     )
     transfer_id = response.json()["transfer_id"]
+    await accept(transfer_id, receiver)
 
     bad = await client.put(
         f"/api/transfers/{transfer_id}/chunks/99", content=b"x", headers=headers(sender)

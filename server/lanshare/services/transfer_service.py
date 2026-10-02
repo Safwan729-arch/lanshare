@@ -170,6 +170,14 @@ class TransferService:
             # in someone's history and a notification they cannot act on.
             raise Forbidden("That device has not been approved")
 
+        # Somebody has to be there to be asked. Refusing here means a send
+        # nobody could have answered leaves no row, no chunk directory and
+        # nothing to sweep later.
+        if not await self._anyone_can_answer(receiver):
+            raise Conflict(
+                f"{receiver['name']} isn't connected. Open LANShare on it and try again."
+            )
+
         safe_name = sanitize_filename(filename)
         # Per transfer, not global: the client uses whatever we return here.
         chunk_size = chunk_size_for(size, base=self._chunk_size)
@@ -189,8 +197,9 @@ class TransferService:
         )
 
         sender = await DeviceRepository.get(self._conn, sender_id)
-        await self._connections.send(
-            receiver_id,
+        audience = [d for d in await self._audience(transfer) if d != sender_id]
+        await self._connections.send_many(
+            audience,
             event(
                 "transfer.incoming",
                 transfer_id=transfer["id"],
@@ -198,6 +207,7 @@ class TransferService:
                 size=size,
                 sender_id=sender_id,
                 sender_name=sender["name"] if sender else "Unknown device",
+                status=transfer["status"],
             ),
         )
         logger.info("Transfer %s created: %s (%d bytes)", transfer["id"], safe_name, size)
@@ -332,6 +342,18 @@ class TransferService:
             if device is not None and is_host_device(device):
                 return
         raise Forbidden("Only the device a file was sent to may answer for it")
+
+    async def _anyone_can_answer(self, receiver: dict[str, Any]) -> bool:
+        """Is there a page open that could accept this?
+
+        A file addressed to the PC names the server's own row, which holds no
+        socket of its own, so the question becomes whether any host page is
+        open.
+        """
+        if receiver["id"] != self._server_device_id:
+            return self._connections.is_online(receiver["id"])
+        hosts = await DeviceRepository.list_hosts(self._conn)
+        return any(self._connections.is_online(str(row["id"])) for row in hosts)
 
     async def _audience(self, transfer: dict[str, Any]) -> list[str]:
         """Which devices hear about this transfer.

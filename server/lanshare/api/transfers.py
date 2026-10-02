@@ -49,6 +49,7 @@ async def create_transfer(
         transfer_id=transfer["id"],
         chunk_size=transfer["chunk_size"],
         total_chunks=transfer["total_chunks"],
+        status=transfer["status"],
     )
 
 

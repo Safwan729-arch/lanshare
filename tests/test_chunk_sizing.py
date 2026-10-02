@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from conftest import LOOPBACK_CLIENT, TEST_CHUNK_SIZE, headers, register
+from conftest import CURRENT_APP, LOOPBACK_CLIENT, TEST_CHUNK_SIZE, headers, online, register
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from lanshare.config import GIB, MAX_CHUNK_SIZE, MAX_SUPPORTED_FILE_SIZE, MIB, Settings
@@ -140,13 +140,18 @@ async def big_client(tmp_path: Path) -> AsyncIterator[AsyncClient]:
         enable_udp_discovery=False,
     )
     app: FastAPI = create_app(settings)
-    async with app.router.lifespan_context(app):
-        transport = ASGITransport(app=app, client=LOOPBACK_CLIENT)
-        async with AsyncClient(transport=transport, base_url="http://testserver") as http:
-            yield http
+    CURRENT_APP.append(app)
+    try:
+        async with app.router.lifespan_context(app):
+            transport = ASGITransport(app=app, client=LOOPBACK_CLIENT)
+            async with AsyncClient(transport=transport, base_url="http://testserver") as http:
+                yield http
+    finally:
+        CURRENT_APP.clear()
 
 
 async def create_transfer(client: AsyncClient, sender: str, receiver: str, size: int) -> dict:
+    online(receiver)
     response = await client.post(
         "/api/transfers",
         json={"filename": "huge.iso", "size": size, "receiver_id": receiver},

@@ -99,6 +99,12 @@ class Settings(BaseSettings):
     #: that page can still finish.
     stale_transfer_hours: int = Field(default=24, ge=1)
 
+    #: How long a recipient has to accept a file before the request expires.
+    #:
+    #: Long enough to notice a prompt and answer it, short enough that a sender
+    #: is not left guessing. The sender is told the outcome either way.
+    consent_timeout_seconds: int = Field(default=120, ge=5, le=3600)
+
     #: How often the chunk sweep runs while the server is up, in hours.
     #:
     #: The sweep used to run only at startup, which is fine for a PC that gets

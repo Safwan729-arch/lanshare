@@ -28,6 +28,11 @@ LAN_CLIENT = ("192.168.1.50", 5000)
 #: have to carry a credential.
 TOKENS: dict[str, str] = {}
 
+#: The app the current test is running against, so helpers that need the
+#: connection registry can reach it without every call site passing it down.
+#: Set by the `app` fixture, in the same spirit as TOKENS above.
+CURRENT_APP: list[FastAPI] = []
+
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
@@ -51,8 +56,12 @@ def settings(tmp_path: Path) -> Settings:
 async def app(settings: Settings) -> AsyncIterator[FastAPI]:
     application = create_app(settings)
     # Runs the same lifespan uvicorn would, so app.state is fully wired.
-    async with application.router.lifespan_context(application):
-        yield application
+    CURRENT_APP.append(application)
+    try:
+        async with application.router.lifespan_context(application):
+            yield application
+    finally:
+        CURRENT_APP.clear()
 
 
 @pytest_asyncio.fixture
@@ -74,12 +83,16 @@ async def lan_client(app: FastAPI) -> AsyncIterator[AsyncClient]:
 
 @pytest_asyncio.fixture
 async def sender(client: AsyncClient) -> str:
-    return await register(client, "iPhone - Safari")
+    device_id = await register(client, "iPhone - Safari")
+    online(device_id)  # a device that can be sent a file has its page open
+    return device_id
 
 
 @pytest_asyncio.fixture
 async def receiver(client: AsyncClient) -> str:
-    return await register(client, "Desktop - Firefox")
+    device_id = await register(client, "Desktop - Firefox")
+    online(device_id)
+    return device_id
 
 
 async def register(client: AsyncClient, name: str) -> str:
@@ -115,6 +128,34 @@ async def approve(client: AsyncClient, approver_id: str, device_id: str) -> None
     assert response.status_code == 200, response.text
 
 
+async def accept(transfer_id: str, receiver_id: str) -> None:
+    """Answer yes to a transfer, as the device it was sent to.
+
+    A file addressed to the PC has no browser behind its row, so it is the host's
+    page that answers: a loopback device, which the app treats as the host.
+    """
+    app = CURRENT_APP[-1]
+    if receiver_id == app.state.server_device_id:
+        transport = ASGITransport(app=app, client=LOOPBACK_CLIENT)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as host:
+            host_id = await register(host, "Host page")
+            online(host_id)
+            response = await host.post(
+                f"/api/transfers/{transfer_id}/consent",
+                json={"decision": "accept"},
+                headers=headers(host_id),
+            )
+    else:
+        transport = ASGITransport(app=app, client=LOOPBACK_CLIENT)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as http:
+            response = await http.post(
+                f"/api/transfers/{transfer_id}/consent",
+                json={"decision": "accept"},
+                headers=headers(receiver_id),
+            )
+    assert response.status_code == 200, response.text
+
+
 async def send_file(
     client: AsyncClient,
     *,
@@ -131,6 +172,8 @@ async def send_file(
     create a half-finished upload.
     """
     skip = skip or set()
+    if receiver_id != CURRENT_APP[-1].state.server_device_id:
+        online(receiver_id)
     response = await client.post(
         "/api/transfers",
         json={
@@ -145,6 +188,8 @@ async def send_file(
     body = response.json()
     transfer_id = body["transfer_id"]
     chunk_size = body["chunk_size"]
+
+    await accept(transfer_id, receiver_id)
 
     for index in range(body["total_chunks"]):
         if index in skip:
@@ -184,3 +229,8 @@ def bring_online(app, device_id: str) -> FakeSocket:
     socket = FakeSocket()
     app.state.connections.add(device_id, socket)
     return socket
+
+
+def online(device_id: str) -> FakeSocket:
+    """Bring a device online in the app the current test is running against."""
+    return bring_online(CURRENT_APP[-1], device_id)
