@@ -13,7 +13,7 @@
  * a stale cached page from a current one, and a browser cache turned a fixed
  * bug into a bug that looked unfixed.
  */
-const CLIENT_VERSION = '13';
+const CLIENT_VERSION = '14';
 
 const DEVICE_ID_KEY = 'lanshare.device_id';
 const DEVICE_NAME_KEY = 'lanshare.device_name';
@@ -201,6 +201,15 @@ export function listPendingDevices() {
 
 export function decideTrust(deviceId, decision) {
   return request(`/api/devices/${deviceId}/trust`, {
+    method: 'POST',
+    headers: deviceHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ decision }),
+  });
+}
+
+/** Accept or refuse a file someone is sending to this device. */
+export function consentToTransfer(transferId, decision) {
+  return request(`/api/transfers/${transferId}/consent`, {
     method: 'POST',
     headers: deviceHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ decision }),

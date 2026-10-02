@@ -39,6 +39,9 @@ export function cacheElements() {
     'waiting-host-url',
     'pending-panel',
     'pending-list',
+    'requests-panel',
+    'request-list',
+    'accept-all',
   ];
   for (const id of ids) {
     elements[id] = document.getElementById(id);
@@ -311,6 +314,38 @@ export function setAwaitingApproval(waiting, { denied = false, offline = false, 
   const footer = document.querySelector('footer');
   if (main) main.hidden = waiting;
   if (footer) footer.hidden = waiting;
+}
+
+export function renderRequests(requests, onDecide) {
+  const list = elements['request-list'];
+  list.replaceChildren();
+  elements['requests-panel'].hidden = requests.length === 0;
+
+  for (const request of requests) {
+    const row = element('li', 'pending-row');
+    const details = element('div', 'pending-details');
+    details.append(
+      element('span', 'pending-name', request.filename),
+      element(
+        'span',
+        'pending-meta',
+        `${formatBytes(request.size)} from ${request.senderName}`
+      )
+    );
+
+    const actions = element('div', 'pending-actions');
+    const accept = element('button', 'button-primary', 'Accept');
+    accept.type = 'button';
+    accept.addEventListener('click', () => onDecide(request.transferId, 'accept'));
+
+    const reject = element('button', 'button-quiet', 'Reject');
+    reject.type = 'button';
+    reject.addEventListener('click', () => onDecide(request.transferId, 'decline'));
+
+    actions.append(accept, reject);
+    row.append(details, actions);
+    list.append(row);
+  }
 }
 
 export function renderPending(devices, onDecide) {

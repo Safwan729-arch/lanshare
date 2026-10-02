@@ -4,6 +4,7 @@
 
 import {
   AuthError,
+  consentToTransfer,
   decideTrust,
   downloadFile,
   downloadUrl,
@@ -16,17 +17,20 @@ import {
   listPendingDevices,
   clearHistory,
   listTransfers,
-} from './api.js?v=13';
-import { DeviceRegistry, ensureRegistered, rename } from './devices.js?v=13';
-import { UploadQueue } from './upload.js?v=13';
-import { RealtimeConnection } from './ws.js?v=13';
-import * as ui from './ui.js?v=13';
-import { start as startParticles } from './particles.js?v=13';
+} from './api.js?v=14';
+import { DeviceRegistry, ensureRegistered, rename } from './devices.js?v=14';
+import { UploadQueue } from './upload.js?v=14';
+import { RealtimeConnection } from './ws.js?v=14';
+import * as ui from './ui.js?v=14';
+import { start as startParticles } from './particles.js?v=14';
 
 const elements = ui.cacheElements();
 const selfId = getDeviceId();
 
 const incoming = new Map();
+//: Files offered to this device and not yet answered. Separate from `incoming`
+//: because one is a decision to make and the other is a transfer in progress.
+const requests = new Map();
 const registry = new DeviceRegistry(() => ui.renderDevices(registry, (id) => registry.select(id)));
 const queue = new UploadQueue(() => ui.renderUploads(queue, (upload) => upload.cancel()));
 const connection = new RealtimeConnection(selfId, getToken);
@@ -72,6 +76,17 @@ connection.on('device.denied', () => {
 connection.on('device.joined', ({ device }) => ui.toast(`${device.name} joined`));
 
 connection.on('transfer.incoming', (data) => {
+  if (data.status === 'awaiting') {
+    requests.set(data.transfer_id, {
+      transferId: data.transfer_id,
+      filename: data.filename,
+      size: data.size,
+      senderName: data.sender_name,
+    });
+    renderRequests();
+    ui.toast(`${data.sender_name} wants to send ${data.filename}`);
+    return;
+  }
   incoming.set(data.transfer_id, {
     transferId: data.transfer_id,
     filename: data.filename,
@@ -110,7 +125,15 @@ connection.on('transfer.failed', (data) => {
 
 connection.on('transfer.cancelled', (data) => {
   incoming.delete(data.transfer_id);
+  requests.delete(data.transfer_id);
   renderIncoming();
+  renderRequests();
+});
+
+connection.on('transfer.declined', (data) => {
+  // Either we answered on another page, or it timed out waiting for us.
+  requests.delete(data.transfer_id);
+  renderRequests();
 });
 
 async function saveFile(transferId, filename) {
@@ -118,6 +141,57 @@ async function saveFile(transferId, filename) {
     await downloadFile(transferId, filename);
   } catch (error) {
     ui.toast(`Could not save the file: ${error.message}`, 'error');
+  }
+}
+
+function renderRequests() {
+  ui.renderRequests([...requests.values()], decideRequest);
+}
+
+/**
+ * Answer one offered file.
+ *
+ * The row is removed first: a person who has pressed Reject should not keep
+ * looking at the prompt while the request goes out, and a failure puts nothing
+ * back because the server's answer is the one that counts - a refresh will show
+ * the truth.
+ */
+async function decideRequest(transferId, decision) {
+  const request = requests.get(transferId);
+  requests.delete(transferId);
+  renderRequests();
+  try {
+    await consentToTransfer(transferId, decision);
+    if (decision === 'accept' && request) {
+      incoming.set(transferId, { ...request, received: 0, ready: false });
+      renderIncoming();
+    }
+  } catch (error) {
+    ui.toast(`Could not answer that: ${error.message}`, 'error');
+  }
+}
+
+/** Offers that arrived before this page was open, or while it was reloading. */
+async function refreshRequests() {
+  try {
+    const response = await listTransfers();
+    // Only files addressed to this device: history is scoped to the caller, so
+    // a file for the PC never appears here. The socket replays those on
+    // connect, which is also what makes a reload safe.
+    const mine = response.transfers.filter(
+      (transfer) => transfer.status === 'awaiting' && transfer.receiver_id === selfId
+    );
+    for (const transfer of mine) {
+      requests.set(transfer.id, {
+        transferId: transfer.id,
+        filename: transfer.filename,
+        size: transfer.size,
+        senderName: 'another device',
+      });
+    }
+    renderRequests();
+  } catch {
+    // Not fatal: the socket announces anything that arrives from now on.
   }
 }
 
@@ -238,6 +312,12 @@ async function decide(deviceId, decision) {
   }
 }
 
+elements['accept-all'].addEventListener('click', async () => {
+  for (const transferId of [...requests.keys()]) {
+    await decideRequest(transferId, 'accept');
+  }
+});
+
 async function refreshPending() {
   try {
     const response = await listPendingDevices();
@@ -330,6 +410,7 @@ async function start() {
 
     await registry.refresh();
     await refreshHistory();
+    await refreshRequests();
     await refreshPending();
     connection.connect();
 

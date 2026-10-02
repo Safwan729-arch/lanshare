@@ -338,6 +338,20 @@ class TransferRepository:
         await conn.commit()
 
     @staticmethod
+    async def awaiting_for(
+        conn: aiosqlite.Connection, *, receiver_ids: tuple[str, ...]
+    ) -> list[dict[str, Any]]:
+        """Offers waiting for an answer, addressed to any of these devices."""
+        placeholders = ", ".join("?" * len(receiver_ids))
+        query = f"""
+            SELECT * FROM transfers
+            WHERE status = 'awaiting' AND receiver_id IN ({placeholders})
+            ORDER BY created_at
+        """
+        async with conn.execute(query, receiver_ids) as cursor:
+            return _rows(await cursor.fetchall())
+
+    @staticmethod
     async def set_status_if(
         conn: aiosqlite.Connection,
         transfer_id: str,

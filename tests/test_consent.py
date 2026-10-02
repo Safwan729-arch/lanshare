@@ -562,3 +562,78 @@ async def test_giving_up_while_waiting_stops_the_timer(app, client, sender, rece
     cancelled = await client.delete(f"/api/transfers/{transfer_id}", headers=headers(sender))
     assert cancelled.status_code == 200
     assert transfer_id not in app.state.transfer_service._consent_timers
+
+
+async def test_a_reconnecting_page_is_told_what_it_missed(app, client, lan_client, sender) -> None:
+    """A prompt must survive the recipient reloading the page.
+
+    A file addressed to the PC names the server's own row, and `GET
+    /api/transfers` is scoped to the caller - so the host's page, which is
+    neither sender nor receiver, can never find it by asking. Without a replay
+    on connect, a reload loses the prompt and the sender waits out the full
+    window for an answer nobody can give.
+    """
+    phone = await register(lan_client, "Phone")
+    await approve(client, sender, phone)
+    online(sender)
+
+    created = await lan_client.post(
+        "/api/transfers",
+        json={"filename": "v.bin", "size": 10, "receiver_id": app.state.server_device_id},
+        headers=headers(phone),
+    )
+    assert created.json()["status"] == "awaiting"
+
+    # The host's page comes back: a fresh socket, where the old one knew everything.
+    reconnected = online(sender)
+    await app.state.transfer_service.replay_requests(sender, reconnected)
+
+    offered = [m for m in reconnected.sent if m["type"] == "transfer.incoming"]
+    assert [m["data"]["transfer_id"] for m in offered] == [created.json()["transfer_id"]]
+    assert offered[0]["data"]["status"] == "awaiting"
+
+
+async def test_a_reconnecting_page_is_not_told_about_other_peoples_files(
+    app, client, lan_client, sender, receiver
+) -> None:
+    """The replay must not become a way to learn what others are being sent."""
+    phone = await register(lan_client, "Phone")
+    await approve(client, sender, phone)
+    online(receiver)
+
+    await lan_client.post(
+        "/api/transfers",
+        json={"filename": "w.bin", "size": 10, "receiver_id": receiver},
+        headers=headers(phone),
+    )
+
+    socket = online(phone)
+    await app.state.transfer_service.replay_requests(phone, socket)
+    assert [m for m in socket.sent if m["type"] == "transfer.incoming"] == []
+
+
+async def test_one_dead_socket_does_not_stop_a_broadcast(app, client, sender, receiver) -> None:
+    """A device that drops off the Wi-Fi mid-broadcast must not take others with it.
+
+    `send` used to catch only RuntimeError and OSError, but every transport
+    reports a dead peer in its own way - Starlette's test transport raises
+    ClosedResourceError and `websockets` raises ConnectionClosed, neither of
+    which is either of those. The exception escaped the loop, so one closed
+    socket stopped the message reaching everyone after it.
+    """
+
+    class ExoticallyDeadSocket:
+        async def send_json(self, message: dict) -> None:
+            raise LookupError("some transport's own idea of a closed stream")
+
+    connections = app.state.connections
+    # A device of its own: the fixtures already hold a live socket each, and a
+    # device stays online while any one of its sockets does.
+    gone = await register(client, "A phone that walked away")
+    connections.add(gone, ExoticallyDeadSocket())
+    alive = online(receiver)
+
+    await connections.broadcast({"type": "device.left", "data": {}})
+
+    assert [m["type"] for m in alive.sent] == ["device.left"]
+    assert not connections.is_online(gone), "a socket that cannot be sent to is dropped"

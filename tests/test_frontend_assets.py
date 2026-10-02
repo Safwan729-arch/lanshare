@@ -228,3 +228,23 @@ def test_every_module_url_carries_the_same_version(api_js: str, html: str) -> No
         "CLIENT_VERSION must match the asset version, or the build a device "
         "reports is not the build it is running"
     )
+
+
+def test_the_requests_panel_is_wired_up() -> None:
+    """Markup that nothing in the JS ever touches is dead furniture.
+
+    This panel is where a person refuses a file, so a typo in an id would mean
+    the prompt never appears and every incoming file waits out its two minutes
+    with nobody able to answer.
+    """
+    html = HTML.read_text(encoding="utf-8")
+    app_js = (FRONTEND / "js" / "app.js").read_text(encoding="utf-8")
+    ui_js = (FRONTEND / "js" / "ui.js").read_text(encoding="utf-8")
+
+    for element_id in ("requests-panel", "request-list", "accept-all"):
+        assert f'id="{element_id}"' in html, f"{element_id} is missing from the markup"
+        assert f"'{element_id}'" in ui_js, f"{element_id} is never looked up"
+
+    assert "renderRequests" in ui_js
+    assert "renderRequests" in app_js
+    assert "consentToTransfer" in app_js

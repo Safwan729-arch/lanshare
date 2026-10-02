@@ -326,6 +326,38 @@ class TransferService:
 
         return await self._require(transfer_id)
 
+    async def replay_requests(self, device_id: str, websocket: Any) -> None:
+        """Tell a page that has just connected what it is already being asked.
+
+        A prompt has to survive a reload. `transfer.incoming` is announced once,
+        over a socket that a refresh throws away, and the page cannot find the
+        offer again by asking: `GET /api/transfers` is scoped to the caller, and
+        a file addressed to the PC names the server's row, so the host's page is
+        neither its sender nor its receiver. Without this the sender waits out
+        the whole window for an answer nobody could give.
+        """
+        addressed_to = [device_id]
+        device = await DeviceRepository.get(self._conn, device_id)
+        if device is not None and is_host_device(device) and self._server_device_id:
+            addressed_to.append(self._server_device_id)
+
+        waiting = await TransferRepository.awaiting_for(
+            self._conn, receiver_ids=tuple(addressed_to)
+        )
+        for transfer in waiting:
+            sender = await DeviceRepository.get(self._conn, transfer["sender_id"])
+            await websocket.send_json(
+                event(
+                    "transfer.incoming",
+                    transfer_id=transfer["id"],
+                    filename=transfer["filename"],
+                    size=transfer["size"],
+                    sender_id=transfer["sender_id"],
+                    sender_name=sender["name"] if sender else "Unknown device",
+                    status=transfer["status"],
+                )
+            )
+
     def _arm_consent_timer(self, transfer_id: str) -> None:
         """Decline a request nobody answers, so the sender is never left hanging."""
 

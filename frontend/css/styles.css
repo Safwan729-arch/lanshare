@@ -640,3 +640,11 @@ footer {
     transition: none;
   }
 }
+
+/* The header carries an action, so it is a row rather than a plain heading. */
+#requests-panel h2 {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}

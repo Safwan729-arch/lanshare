@@ -404,6 +404,10 @@ def _register_websocket(app: FastAPI) -> None:
                 exclude=device_id,
             )
         await _push_device_list(app)
+        # A reload throws away the socket an offer was announced on, and the
+        # page cannot ask for it back - history is scoped to the caller, and a
+        # file for the PC belongs to neither party at this keyboard.
+        await app.state.transfer_service.replay_requests(device_id, websocket)
 
         try:
             while True:

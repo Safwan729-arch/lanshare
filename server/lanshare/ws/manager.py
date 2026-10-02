@@ -65,7 +65,14 @@ class ConnectionManager:
             try:
                 await websocket.send_json(message)
                 timing.mark("ws.send.ok", device=device_id[:8], socket=number)
-            except (RuntimeError, OSError) as exc:  # closed mid-send
+            # Broad on purpose. Every transport reports a dead peer in its own
+            # way - `websockets` raises ConnectionClosed, Starlette's test
+            # transport raises anyio's ClosedResourceError, and neither is a
+            # RuntimeError or an OSError. Naming them one at a time means the
+            # next one escapes and takes down the endpoint that was merely
+            # telling everybody something. CancelledError is a BaseException,
+            # so shutdown still interrupts this.
+            except Exception as exc:
                 timing.mark("ws.send.fail", device=device_id[:8], socket=number, error=repr(exc))
                 logger.debug("Dropping dead socket for %s: %s", device_id, exc)
                 self.remove(device_id, websocket)
