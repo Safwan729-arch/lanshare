@@ -99,7 +99,15 @@ def test_the_installer_points_at_files_that_exist() -> None:
     installer = read(INSTALLER)
     for name in (SHIM.name, ICON.name):
         assert name in installer
-    assert "Desktop" in installer
+
+
+def test_the_installer_writes_into_the_project_by_default() -> None:
+    """Writing outside the repo is opt-in: the icon belongs to the project."""
+    installer = read(INSTALLER)
+    default = next(ln for ln in installer.splitlines() if "$locations = @(" in ln)
+    assert default.strip() == "$locations = @($root)"
+    for switch in ("if ($Desktop)", "if ($StartMenu)"):
+        assert switch in installer, f"{switch} must guard a write outside the repo"
 
 
 def test_the_icon_matches_its_generator() -> None:

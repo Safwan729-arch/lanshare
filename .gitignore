@@ -26,3 +26,7 @@ vault/
 
 # Certificates, if you enable HTTPS.
 *.pem
+
+# The app icon, created by tools/install-shortcut.ps1. A .lnk stores absolute
+# paths, so it is specific to one machine and one project location.
+/LANShare.lnk

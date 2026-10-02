@@ -112,15 +112,24 @@ uvicorn lanshare.main:app --host 0.0.0.0 --port 8080 --reload --app-dir server -
 
 ### One click instead of a command
 
-To start the server by double-clicking an icon, make a desktop shortcut once:
+Run this once to create the app icon, `LANShare.lnk`, in the project folder:
 
 ```powershell
-.\tools\install-shortcut.ps1          # add -StartMenu to also find it from Start
+.\tools\install-shortcut.ps1
 ```
 
-The shortcut starts the server in its own window, waits until it answers, and opens the page
-in your browser. Double-clicking it again when the server is already up just opens the page
-instead of starting a second one. `install-shortcut.ps1 -Remove` deletes it.
+Double-clicking it starts the server in its own window, waits until the server answers, and
+opens the page in your browser. Double-clicking it again when the server is already up just
+opens the page instead of starting a second one.
+
+To launch it from somewhere else - the desktop, a folder you keep open, the taskbar - copy
+`LANShare.lnk` there, or right-click it and choose **Create shortcut**. A copied .lnk keeps
+the icon and still points at the project, so the copies need nothing of their own. The
+script can also place them for you: `-Desktop`, `-StartMenu`, and `-Remove` to delete the
+ones it made.
+
+The .lnk stores absolute paths, so it is not committed, and it stops working if you move
+the project folder. Re-run the script to repair it.
 
 ### First run on Windows
 
@@ -410,7 +419,7 @@ frontend/                # No build step, no npm, no framework
 tools/                   # Desktop launcher: LANShare.cmd, the .ps1 behind it,
                          # install-shortcut.ps1, and make_icon.py (draws the .ico)
 
-tests/                   # 276 tests
+tests/                   # 277 tests
 ```
 
 Routers stay thin, logic lives in `services/`, and **all** SQL lives in

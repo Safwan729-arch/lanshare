@@ -1,23 +1,35 @@
 <#
 .SYNOPSIS
-    Puts a LANShare shortcut on the desktop.
+    Creates the LANShare app icon.
 
 .DESCRIPTION
-    Creates LANShare.lnk pointing at tools\LANShare.cmd, with the generated
-    icon. Re-running it overwrites the existing shortcut, so this is also how to
-    repair one after moving the project folder.
+    Writes LANShare.lnk in the project folder, pointing at tools\LANShare.cmd
+    with the generated icon. That one is the app: copy it, or right-click it and
+    choose "Create shortcut", to put a launcher anywhere on the machine. A copied
+    .lnk keeps both the icon and the target, so the copies need nothing from here.
 
-    This is the only thing in the project that writes outside the repo, which is
-    why it is a separate script you run once rather than part of the launcher.
+    Re-running this overwrites the file, which is how to repair it after moving
+    the project folder - and the copies, which point at the project folder rather
+    than at this .lnk, need repairing the same way.
+
+    The .lnk stores absolute paths, so it is specific to this machine and is not
+    committed.
 
 .EXAMPLE
     .\tools\install-shortcut.ps1
+    Creates LANShare.lnk in the project folder.
 .EXAMPLE
-    .\tools\install-shortcut.ps1 -StartMenu
-    Also adds a Start-menu entry, so typing "LANShare" in Start finds it.
+    .\tools\install-shortcut.ps1 -Desktop -StartMenu
+    Also puts one on the desktop and in Start. These write outside the repo,
+    which is why they are opt-in and why this is a separate script rather than
+    something the launcher does.
+.EXAMPLE
+    .\tools\install-shortcut.ps1 -Desktop -Remove
+    Deletes the ones it created, from the same places.
 #>
 [CmdletBinding()]
 param(
+    [switch]$Desktop,
     [switch]$StartMenu,
     [switch]$Remove
 )
@@ -30,7 +42,10 @@ $icon = Join-Path $PSScriptRoot 'lanshare.ico'
 
 if (-not (Test-Path $target)) { throw "Missing launcher: $target" }
 
-$locations = @([Environment]::GetFolderPath('Desktop'))
+# The project folder always, so there is one icon that belongs to the project
+# and everything else is a copy of it.
+$locations = @($root)
+if ($Desktop) { $locations += [Environment]::GetFolderPath('Desktop') }
 if ($StartMenu) {
     $locations += Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
 }
