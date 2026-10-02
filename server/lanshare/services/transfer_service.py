@@ -211,6 +211,8 @@ class TransferService:
         transfer = await self._require(transfer_id)
         if transfer["sender_id"] != sender_id:
             raise Forbidden("Only the sender may upload chunks")
+        if transfer["status"] == AWAITING:
+            raise Conflict("The recipient has not accepted this transfer yet")
         if transfer["status"] not in ACTIVE_STATUSES:
             raise Conflict("Transfer is " + transfer["status"])
         if not 0 <= index < transfer["total_chunks"]:
@@ -251,6 +253,38 @@ class TransferService:
         )
         timing.mark("notify.done", tid=transfer_id[:8], index=index)
         return written, received
+
+    async def consent(self, *, transfer_id: str, device_id: str, accept: bool) -> dict[str, Any]:
+        """Answer a waiting transfer. Returns the row in its new state."""
+        transfer = await self._require(transfer_id)
+        await self.require_may_answer(transfer, device_id)
+
+        if transfer["status"] != AWAITING:
+            if transfer["status"] == "declined":
+                raise Conflict("That request has expired")
+            raise Conflict("Transfer is " + transfer["status"])
+
+        if accept:
+            await TransferRepository.set_status(self._conn, transfer_id, "pending")
+            await self._notify(
+                transfer, event("transfer.accepted", transfer_id=transfer_id, by=device_id)
+            )
+            logger.info("Transfer %s accepted by %s", transfer_id, device_id)
+        else:
+            await self._decline(transfer, reason="Declined", by=device_id)
+
+        return await self._require(transfer_id)
+
+    async def _decline(
+        self, transfer: dict[str, Any], *, reason: str, by: str | None = None
+    ) -> None:
+        """Refuse a waiting transfer. Nothing is on disk yet, so nothing is deleted."""
+        await TransferRepository.set_status(self._conn, transfer["id"], "declined", error=reason)
+        await self._notify(
+            transfer,
+            event("transfer.declined", transfer_id=transfer["id"], reason=reason, by=by),
+        )
+        logger.info("Transfer %s declined (%s)", transfer["id"], reason)
 
     async def get(self, transfer_id: str, *, device_id: str | None = None) -> dict[str, Any]:
         transfer = await self._require(transfer_id)
@@ -311,6 +345,8 @@ class TransferService:
             raise Forbidden("Only the sender may complete a transfer")
         if transfer["status"] == "completed":
             return transfer  # idempotent: a retried complete is not an error
+        if transfer["status"] == AWAITING:
+            raise Conflict("The recipient has not accepted this transfer yet")
         if transfer["status"] not in ACTIVE_STATUSES:
             raise Conflict("Transfer is " + transfer["status"])
 

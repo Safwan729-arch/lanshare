@@ -142,3 +142,121 @@ async def test_a_transfer_for_the_pc_is_announced_to_the_host(
     audience = await service._audience(transfer)
     assert sender in audience, "the host's own page must hear about it"
     assert bystander not in audience, "a trusted device that is not the host must not"
+
+
+async def test_accepting_unblocks_the_upload(app, client, sender, receiver) -> None:
+    """The whole point: the bytes move only after someone says yes."""
+    transfer_id = await send_file(
+        client, sender_id=sender, receiver_id=receiver, filename="g.bin", payload=b"x" * 10
+    )
+    await force_awaiting(app, transfer_id)
+
+    blocked = await client.put(
+        f"/api/transfers/{transfer_id}/chunks/0", content=b"x" * 10, headers=headers(sender)
+    )
+    assert blocked.status_code == 409
+    assert "not accepted" in blocked.json()["detail"]
+
+    accepted = await client.post(
+        f"/api/transfers/{transfer_id}/consent",
+        json={"decision": "accept"},
+        headers=headers(receiver),
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["status"] == "pending"
+
+    allowed = await client.put(
+        f"/api/transfers/{transfer_id}/chunks/0", content=b"x" * 10, headers=headers(sender)
+    )
+    assert allowed.status_code == 200
+
+
+async def test_declining_is_terminal(app, client, sender, receiver, settings) -> None:
+    """A refusal ends the transfer; it cannot be restarted by uploading anyway."""
+    transfer_id = await send_file(
+        client, sender_id=sender, receiver_id=receiver, filename="h.bin", payload=b"x" * 10
+    )
+    await force_awaiting(app, transfer_id)
+
+    declined = await client.post(
+        f"/api/transfers/{transfer_id}/consent",
+        json={"decision": "decline"},
+        headers=headers(receiver),
+    )
+    assert declined.status_code == 200
+    assert declined.json()["status"] == "declined"
+
+    blocked = await client.put(
+        f"/api/transfers/{transfer_id}/chunks/0", content=b"x" * 10, headers=headers(sender)
+    )
+    assert blocked.status_code == 409
+    assert list(settings.incoming_dir.glob("h.bin*")) == []
+
+
+async def test_a_third_device_cannot_answer(app, client, lan_client, sender, receiver) -> None:
+    """Being trusted is not being involved."""
+    stranger = await register(lan_client, "Stranger")
+    await approve(client, sender, stranger)
+
+    transfer_id = await send_file(
+        client, sender_id=sender, receiver_id=receiver, filename="i.bin", payload=b"x" * 10
+    )
+    await force_awaiting(app, transfer_id)
+
+    refused = await lan_client.post(
+        f"/api/transfers/{transfer_id}/consent",
+        json={"decision": "accept"},
+        headers=headers(stranger),
+    )
+    assert refused.status_code == 403
+
+
+async def test_answering_twice_is_refused(app, client, sender, receiver) -> None:
+    """Two host pages could both be open; the first answer is the decision."""
+    transfer_id = await send_file(
+        client, sender_id=sender, receiver_id=receiver, filename="j.bin", payload=b"x" * 10
+    )
+    await force_awaiting(app, transfer_id)
+    body = {"decision": "accept"}
+
+    first = await client.post(
+        f"/api/transfers/{transfer_id}/consent", json=body, headers=headers(receiver)
+    )
+    second = await client.post(
+        f"/api/transfers/{transfer_id}/consent", json=body, headers=headers(receiver)
+    )
+    assert first.status_code == 200
+    assert second.status_code == 409
+
+
+async def test_accepting_an_expired_request_says_so(app, client, sender, receiver) -> None:
+    """A request that timed out must not look like a server fault."""
+    transfer_id = await send_file(
+        client, sender_id=sender, receiver_id=receiver, filename="k.bin", payload=b"x" * 10
+    )
+    connection = app.state.database.connection
+    await TransferRepository.set_status(connection, transfer_id, "declined", error="No answer")
+
+    late = await client.post(
+        f"/api/transfers/{transfer_id}/consent",
+        json={"decision": "accept"},
+        headers=headers(receiver),
+    )
+    assert late.status_code == 409
+    assert "expired" in late.json()["detail"]
+
+
+@pytest.mark.parametrize("decision", ["maybe", "", "APPROVE", "yes"])
+async def test_a_decision_must_be_accept_or_decline(
+    app, client, sender, receiver, decision
+) -> None:
+    transfer_id = await send_file(
+        client, sender_id=sender, receiver_id=receiver, filename="l.bin", payload=b"x" * 10
+    )
+    await force_awaiting(app, transfer_id)
+    response = await client.post(
+        f"/api/transfers/{transfer_id}/consent",
+        json={"decision": decision},
+        headers=headers(receiver),
+    )
+    assert response.status_code == 422

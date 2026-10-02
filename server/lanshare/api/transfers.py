@@ -10,6 +10,7 @@ from .. import timing
 from ..models import (
     ChunkUploadResponse,
     ClearHistoryResponse,
+    ConsentDecisionRequest,
     TransferCreateRequest,
     TransferCreateResponse,
     TransferListResponse,
@@ -106,6 +107,24 @@ async def get_transfer(
     trusted device watch a transfer it has nothing to do with.
     """
     return _response(service, await service.get(transfer_id, device_id=device_id))
+
+
+@router.post("/{transfer_id}/consent", response_model=TransferResponse)
+async def consent_to_transfer(
+    transfer_id: TransferIdPath,
+    payload: ConsentDecisionRequest,
+    device_id: DeviceIdDep,
+    service: ServiceDep,
+) -> TransferResponse:
+    """Accept or refuse a file someone is sending you.
+
+    Deliberately shaped like `POST /api/devices/{id}/trust`: this app asks a
+    person two questions, and they should read the same way.
+    """
+    answered = await service.consent(
+        transfer_id=transfer_id, device_id=device_id, accept=payload.decision == "accept"
+    )
+    return _response(service, answered)
 
 
 @router.post("/{transfer_id}/complete", response_model=TransferResponse)

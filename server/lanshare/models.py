@@ -121,6 +121,12 @@ class TrustDecisionRequest(BaseModel):
     decision: Literal["approve", "deny", "block"]
 
 
+class ConsentDecisionRequest(BaseModel):
+    """Accept or refuse a file someone is trying to send you."""
+
+    decision: Literal["accept", "decline"]
+
+
 class DeviceListResponse(BaseModel):
     devices: list[DeviceResponse]
 
