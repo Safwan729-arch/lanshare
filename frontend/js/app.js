@@ -17,12 +17,12 @@ import {
   listPendingDevices,
   clearHistory,
   listTransfers,
-} from './api.js?v=14';
-import { DeviceRegistry, ensureRegistered, rename } from './devices.js?v=14';
-import { UploadQueue } from './upload.js?v=14';
-import { RealtimeConnection } from './ws.js?v=14';
-import * as ui from './ui.js?v=14';
-import { start as startParticles } from './particles.js?v=14';
+} from './api.js?v=15';
+import { DeviceRegistry, ensureRegistered, rename } from './devices.js?v=15';
+import { UploadQueue } from './upload.js?v=15';
+import { RealtimeConnection } from './ws.js?v=15';
+import * as ui from './ui.js?v=15';
+import { start as startParticles } from './particles.js?v=15';
 
 const elements = ui.cacheElements();
 const selfId = getDeviceId();
@@ -31,6 +31,9 @@ const incoming = new Map();
 //: Files offered to this device and not yet answered. Separate from `incoming`
 //: because one is a decision to make and the other is a transfer in progress.
 const requests = new Map();
+//: The PC's own device row, which is not this browser. A file addressed to it
+//: lands in the PC's incoming folder, so this page has nothing to download.
+let serverDeviceId = null;
 const registry = new DeviceRegistry(() => ui.renderDevices(registry, (id) => registry.select(id)));
 const queue = new UploadQueue(() => ui.renderUploads(queue, (upload) => upload.cancel()));
 const connection = new RealtimeConnection(selfId, getToken);
@@ -110,9 +113,15 @@ connection.on('transfer.completed', (data) => {
   const item = incoming.get(data.transfer_id);
   if (item) {
     item.ready = true;
+    item.savedHere = data.receiver_id === serverDeviceId;
     item.downloadUrl = downloadUrl(data.transfer_id);
     renderIncoming();
-    ui.toast(`${item.filename} is ready to save`, 'success');
+    ui.toast(
+      item.savedHere
+        ? `${item.filename} was saved on this PC`
+        : `${item.filename} is ready to save`,
+      'success'
+    );
   }
   refreshHistory();
 });
@@ -405,6 +414,7 @@ async function start() {
     ui.setAwaitingApproval(false);
 
     const info = await getServerInfo();
+    serverDeviceId = info.server_device_id;
     ui.setServerHint(info);
     ui.setPairing(info);
 

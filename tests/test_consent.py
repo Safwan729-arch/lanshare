@@ -637,3 +637,43 @@ async def test_one_dead_socket_does_not_stop_a_broadcast(app, client, sender, re
 
     assert [m["type"] for m in alive.sent] == ["device.left"]
     assert not connections.is_online(gone), "a socket that cannot be sent to is dropped"
+
+
+async def test_the_host_page_is_not_a_party_to_a_file_sent_to_the_pc(
+    app, client, lan_client, sender
+) -> None:
+    """Why the page must not offer to download a file already on its own disk.
+
+    The host's page answers for the PC, but it is not the PC: the transfer's
+    receiver is the server's own device row. Downloads are restricted to the two
+    parties, so pressing Save on such a file gives a 403 - which is exactly what
+    happened the first time someone accepted a photo from their phone.
+
+    The fix is on the page, not here: a file addressed to the PC is already in
+    `storage/incoming`, so there is nothing to download. This test pins the
+    reason, so nobody later "fixes" the 403 by widening who may read files.
+    """
+    phone = await register(lan_client, "Phone")
+    await approve(client, sender, phone)
+    online(sender)
+
+    created = await lan_client.post(
+        "/api/transfers",
+        json={"filename": "x.jpeg", "size": 5, "receiver_id": app.state.server_device_id},
+        headers=headers(phone),
+    )
+    transfer_id = created.json()["transfer_id"]
+    await client.post(
+        f"/api/transfers/{transfer_id}/consent",
+        json={"decision": "accept"},
+        headers=headers(sender),
+    )
+    await lan_client.put(
+        f"/api/transfers/{transfer_id}/chunks/0", content=b"hello", headers=headers(phone)
+    )
+    await lan_client.post(f"/api/transfers/{transfer_id}/complete", headers=headers(phone))
+
+    refused = await client.get(
+        f"/api/files/{transfer_id}/download", headers=headers(sender)
+    )
+    assert refused.status_code == 403

@@ -248,3 +248,24 @@ def test_the_requests_panel_is_wired_up() -> None:
     assert "renderRequests" in ui_js
     assert "renderRequests" in app_js
     assert "consentToTransfer" in app_js
+
+
+def test_a_file_already_on_this_pc_offers_no_download() -> None:
+    """The host's page answers for the PC but is not the PC.
+
+    A file addressed to the PC is already in its incoming folder, and this page
+    is neither party to that transfer - so a Save button there both duplicates a
+    file the machine has and fails with 403 when pressed. That is exactly what
+    happened the first time someone accepted a photo from their phone.
+    """
+    ui_js = (FRONTEND / "js" / "ui.js").read_text(encoding="utf-8")
+    app_js = (FRONTEND / "js" / "app.js").read_text(encoding="utf-8")
+
+    assert "savedHere" in ui_js, "the renderer must distinguish a file already here"
+    assert "Saved on this PC" in ui_js
+    assert "serverDeviceId" in app_js, "the page must know which row means the PC"
+
+    save_branch = ui_js.split("if (item.savedHere)")[1].split("const dismiss")[0]
+    assert "button-primary" in save_branch.split("} else {")[1], (
+        "the Save button must live in the else branch, not run unconditionally"
+    )

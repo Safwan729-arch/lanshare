@@ -210,12 +210,21 @@ export function renderIncoming(items, onDismiss, onSave) {
 
     if (item.ready) {
       row.append(element('div', 'transfer-status', `From ${item.senderName}`));
-      // A button, not a link: the download endpoint needs an Authorization
-      // header now, and an <a href> cannot send one.
-      const save = element('button', 'button-primary', 'Save file');
-      save.type = 'button';
-      save.addEventListener('click', () => onSave(item));
-      row.append(save);
+      // A file addressed to the PC is already in its incoming folder - this
+      // page answered for the PC, it is not the PC. Offering to download it
+      // would be offering a copy of a file the machine already has, and the
+      // download would be refused anyway: this page is neither party to that
+      // transfer, which is a 403 and a puzzle for whoever pressed the button.
+      if (item.savedHere) {
+        row.append(element('div', 'transfer-status', 'Saved on this PC'));
+      } else {
+        // A button, not a link: the download endpoint needs an Authorization
+        // header now, and an <a href> cannot send one.
+        const save = element('button', 'button-primary', 'Save file');
+        save.type = 'button';
+        save.addEventListener('click', () => onSave(item));
+        row.append(save);
+      }
 
       const dismiss = element('button', 'link-button', 'Dismiss');
       dismiss.type = 'button';

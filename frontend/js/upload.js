@@ -12,7 +12,7 @@ import {
   digestOf,
   getTransfer,
   uploadChunk,
-} from './api.js?v=14';
+} from './api.js?v=15';
 
 const MAX_CHUNK_ATTEMPTS = 3;
 const RETRY_BASE_MS = 600;
