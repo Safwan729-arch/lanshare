@@ -7,6 +7,8 @@ name = "lanshare"
 version = "0.1.0"
 description = "Send files between devices on the same local network. No cloud."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",

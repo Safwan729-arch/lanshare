@@ -576,6 +576,5 @@ Known and deliberate, as of now:
 
 ## License
 
-No license file yet, which means default copyright applies — all rights reserved. Add a
-`LICENSE` file (MIT and Apache-2.0 are the usual choices for something like this) if you want
-others to be able to use it.
+[MIT](LICENSE). Use it, change it, ship it; keep the copyright notice, and it comes with no
+warranty.
