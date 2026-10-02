@@ -370,7 +370,7 @@ class TransferService:
         goes with it.
         """
         removed = await TransferRepository.clear_history(
-            self._conn, device_id=device_id, active=tuple(sorted(LIVE_STATUSES))
+            self._conn, device_id=device_id, live=tuple(sorted(LIVE_STATUSES))
         )
         for transfer_id in removed:
             # rmtree is blocking, and clearing a long history is many of them.
