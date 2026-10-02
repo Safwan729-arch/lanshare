@@ -26,6 +26,7 @@ FALLBACK_HARNESS = JS / "upload_fallback_harness.mjs"
 TIMEOUT_HARNESS = JS / "request_timeout_harness.mjs"
 PARTICLES_HARNESS = JS / "particles_harness.mjs"
 INTEGRITY_HARNESS = JS / "integrity_harness.mjs"
+CONSENT_HARNESS = JS / "consent_harness.mjs"
 API_JS = ROOT / "frontend" / "js" / "api.js"
 UPLOAD_JS = ROOT / "frontend" / "js" / "upload.js"
 
@@ -83,6 +84,13 @@ def test_a_call_to_a_dead_connection_fails_instead_of_hanging(frontend_as_module
     browser reuses it anyway and will not retry the POST, so without a timeout
     the upload sits on "Starting..." forever and the queue stalls behind it."""
     run_harness(TIMEOUT_HARNESS, frontend_as_modules / API_JS.name)
+
+
+@requires_node
+def test_the_sender_waits_to_be_allowed(frontend_as_modules: Path) -> None:
+    """An upload must send nothing while the recipient is deciding, and must end
+    with a reason rather than a spinner if they refuse or never answer."""
+    run_harness(CONSENT_HARNESS, frontend_as_modules / UPLOAD_JS.name)
 
 
 @requires_node

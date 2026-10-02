@@ -44,6 +44,23 @@ export class Upload {
     this.current = null; // the in-flight chunk request
     this.cancelled = false;
     this.buffer = null; // whole-file bytes, only once slicing has failed us
+
+    // Injected so a test can drive a recipient's decision without a server.
+    // Production never passes anything: these are the real functions.
+    this.deps = {
+      createTransfer,
+      getTransfer,
+      uploadChunk,
+      completeTransfer,
+      cancelTransfer,
+      sleep,
+    };
+
+    // How many times to ask whether we have been allowed yet, at a second
+    // each. Deliberately longer than the server's own window: the server
+    // decides when a request has expired, and a client that gave up first
+    // would invent a verdict for a transfer that could still be accepted.
+    this.consentPolls = 150;
   }
 
   get progress() {
@@ -68,7 +85,7 @@ export class Upload {
       // enough to hold. When it is a hash, the server refuses the transfer if
       // what it assembled is not what we sent.
       const sha256 = await digestOf(this.file);
-      const created = await createTransfer({
+      const created = await this.deps.createTransfer({
         filename: this.file.name,
         size: this.file.size,
         mimeType: this.file.type,
@@ -79,11 +96,20 @@ export class Upload {
       this.chunkSize = created.chunk_size;
       this.totalChunks = created.total_chunks;
 
+      // `awaiting` means the file has been offered and not yet accepted. A
+      // transfer you send to your own PC comes back `pending` instead - the
+      // server accepted it on creation, because the only device that could
+      // answer was this one.
+      if (created.status === 'awaiting') {
+        await this.waitForDecision();
+        if (this.cancelled) return;
+      }
+
       this.setStatus('uploading');
       await this.sendMissingChunks();
 
       if (this.cancelled) return;
-      const finished = await completeTransfer(this.transferId);
+      const finished = await this.deps.completeTransfer(this.transferId);
       this.bytesSent = this.file.size;
       this.sha256 = finished.sha256;
       this.setStatus('completed');
@@ -96,9 +122,37 @@ export class Upload {
     }
   }
 
+  /**
+   * Wait until the recipient accepts, refuses, or the request expires.
+   *
+   * Polled rather than pushed. Reaching the WebSocket from here would mean
+   * threading the connection through the queue into every upload, and on a LAN
+   * a one-second poll is imperceptible beside a decision a person is making.
+   *
+   * The server owns the verdict, including the timeout: this loop outlasts the
+   * server's window so that "no answer" is something the server decided, not
+   * something this client guessed.
+   */
+  async waitForDecision() {
+    this.setStatus('waiting');
+    for (let attempt = 0; attempt < this.consentPolls; attempt += 1) {
+      if (this.cancelled) return;
+      await this.deps.sleep(1000);
+      const { status } = await this.deps.getTransfer(this.transferId);
+      if (status === 'pending' || status === 'uploading') return;
+      if (status === 'declined') {
+        throw new Error('The other device declined this file');
+      }
+      if (status === 'cancelled') {
+        throw new Error('That transfer was cancelled');
+      }
+    }
+    throw new Error('No answer from the other device');
+  }
+
   /** Ask the server what it already has, then send only the gaps. */
   async sendMissingChunks() {
-    const status = await getTransfer(this.transferId);
+    const status = await this.deps.getTransfer(this.transferId);
     this.sentChunks = new Set(status.received_chunks);
     this.recalculateBytes();
     this.report();
@@ -147,7 +201,7 @@ export class Upload {
       if (this.cancelled) return;
       // Rebuilt every attempt: a retry after a stall may need to come from the
       // buffered copy rather than from another slice of the file.
-      this.current = uploadChunk({
+      this.current = this.deps.uploadChunk({
         transferId: this.transferId,
         index,
         blob: this.bodyFor(index),
@@ -182,7 +236,7 @@ export class Upload {
         if (attempt === MAX_CHUNK_ATTEMPTS) throw error;
         // A dropped Wi-Fi packet or a backgrounded tab: wait, then retry the
         // same index. Re-sending a chunk is safe, the server overwrites it.
-        await sleep(RETRY_BASE_MS * 2 ** (attempt - 1));
+        await this.deps.sleep(RETRY_BASE_MS * 2 ** (attempt - 1));
       } finally {
         this.current = null;
       }
@@ -198,7 +252,7 @@ export class Upload {
     if (this.current) this.current.abort();
     if (this.transferId && this.status !== 'completed') {
       try {
-        await cancelTransfer(this.transferId);
+        await this.deps.cancelTransfer(this.transferId);
       } catch {
         // Already gone server-side; nothing to clean up.
       }
