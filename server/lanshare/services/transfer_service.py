@@ -553,6 +553,10 @@ class TransferService:
         if transfer["status"] not in LIVE_STATUSES:
             raise Conflict("Transfer is already " + transfer["status"])
 
+        # A sender giving up while the recipient decides is an ordinary way out
+        # of `awaiting`, and it leaves a timer behind that would sit there until
+        # it fired on a row it can no longer change.
+        self._cancel_consent_timer(transfer_id)
         await TransferRepository.set_status(self._conn, transfer_id, "cancelled")
         await run_in_threadpool(self._storage.cleanup, transfer_id)
         await self._notify(

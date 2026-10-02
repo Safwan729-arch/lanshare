@@ -541,3 +541,24 @@ async def test_the_timers_stop_with_the_server(settings) -> None:
         assert service._consent_timers
 
     assert not service._consent_timers
+
+
+async def test_giving_up_while_waiting_stops_the_timer(app, client, sender, receiver) -> None:
+    """A sender cancelling is an ordinary way out of `awaiting`.
+
+    The timer would otherwise sit there until it fired on a row it can no
+    longer change - harmless, but it is a task per abandoned send held for the
+    whole window.
+    """
+    app.state.transfer_service._consent_timeout = 60
+    created = await client.post(
+        "/api/transfers",
+        json={"filename": "u.bin", "size": 10, "receiver_id": receiver},
+        headers=headers(sender),
+    )
+    transfer_id = created.json()["transfer_id"]
+    assert transfer_id in app.state.transfer_service._consent_timers
+
+    cancelled = await client.delete(f"/api/transfers/{transfer_id}", headers=headers(sender))
+    assert cancelled.status_code == 200
+    assert transfer_id not in app.state.transfer_service._consent_timers
