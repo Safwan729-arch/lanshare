@@ -99,6 +99,21 @@ class Settings(BaseSettings):
     #: that page can still finish.
     stale_transfer_hours: int = Field(default=24, ge=1)
 
+    #: How often the chunk sweep runs while the server is up, in hours.
+    #:
+    #: The sweep used to run only at startup, which is fine for a PC that gets
+    #: shut down and useless for one that does not. Set to 0 to run it only at
+    #: startup.
+    sweep_interval_hours: float = Field(default=6.0, ge=0)
+
+    #: Must pairing decisions come from the host machine?
+    #:
+    #: Approving a device grants it everything, so the decision belongs at the
+    #: host's own keyboard - which is where the README has always sent people.
+    #: With this off, any trusted device may approve another, and one approval
+    #: can quietly beget the next.
+    approval_from_host_only: bool = True
+
     #: How many devices may sit unapproved at once.
     #:
     #: Registration has to be open - a device needs an identity before anyone

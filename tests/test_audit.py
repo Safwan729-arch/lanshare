@@ -8,16 +8,19 @@ because the fixes are small and easy to undo by accident.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import uuid
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from conftest import LOOPBACK_CLIENT, headers, register, send_file
+from conftest import LOOPBACK_CLIENT, approve, headers, register, send_file
 from httpx import ASGITransport, AsyncClient
+from lanshare.api.devices import host_device_ids
 from lanshare.config import Settings
 from lanshare.db.repositories import TransferRepository
 from lanshare.main import create_app
+from lanshare.services.auth import is_host_device
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
@@ -417,3 +420,233 @@ async def test_clearing_history_does_not_block_the_event_loop(app, client, sende
     assert cleared.json()["deleted"] == 1
     assert not directory.exists()
     assert await TransferRepository.get(app.state.database.connection, transfer_id) is None
+
+
+# -- pairing decisions belong to the host --------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_trusted_phone_cannot_approve_another_device(
+    client, lan_client, sender
+) -> None:
+    """Approval grants everything, so one approval must not beget the next.
+
+    Being trusted used to be enough to approve. A phone that had been approved
+    once could then approve a stranger, with nobody at the host ever seeing it
+    - and the pending list it read on the way names every waiting device and
+    the address it came from.
+    """
+    phone = await register(lan_client, "Approved phone")
+    await approve(client, sender, phone)
+
+    waiting = await register(lan_client, "Stranger")
+
+    listed = await lan_client.get("/api/devices/pending", headers=headers(phone))
+    assert listed.status_code == 403
+
+    decided = await lan_client.post(
+        f"/api/devices/{waiting}/trust",
+        json={"decision": "approve"},
+        headers=headers(phone),
+    )
+    assert decided.status_code == 403
+    assert "on the host" in decided.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_the_host_still_approves_and_lists(client, lan_client, sender) -> None:
+    """The fix is worthless if it also stops the person who is meant to decide."""
+    waiting = await register(lan_client, "Phone")
+
+    listed = await client.get("/api/devices/pending", headers=headers(sender))
+    assert listed.status_code == 200
+    assert [device["id"] for device in listed.json()["devices"]] == [waiting]
+
+    decided = await client.post(
+        f"/api/devices/{waiting}/trust",
+        json={"decision": "approve"},
+        headers=headers(sender),
+    )
+    assert decided.status_code == 200
+    assert decided.json()["trust_state"] == "trusted"
+
+
+@pytest.mark.asyncio
+async def test_host_only_approval_can_be_turned_off(settings: Settings) -> None:
+    """An escape hatch for anyone who wants the old behaviour back."""
+    settings.approval_from_host_only = False
+    application = create_app(settings)
+    async with application.router.lifespan_context(application):
+        host = AsyncClient(
+            transport=ASGITransport(app=application, client=LOOPBACK_CLIENT),
+            base_url="http://testserver",
+        )
+        lan = AsyncClient(
+            transport=ASGITransport(app=application, client=("192.168.1.50", 5000)),
+            base_url="http://testserver",
+        )
+        async with host, lan:
+            approver = await register(host, "Host browser")
+            phone = await register(lan, "Phone")
+            await approve(host, approver, phone)
+            stranger = await register(lan, "Stranger")
+
+            decided = await lan.post(
+                f"/api/devices/{stranger}/trust",
+                json={"decision": "approve"},
+                headers=headers(phone),
+            )
+            assert decided.status_code == 200
+
+
+def test_what_counts_as_the_host() -> None:
+    """Two ways to be the host, and no way to claim it from the LAN."""
+    assert is_host_device({"kind": "server", "first_address": None})
+    assert is_host_device({"kind": "browser", "first_address": "127.0.0.1"})
+    assert is_host_device({"kind": "browser", "first_address": "::1"})
+    assert not is_host_device({"kind": "browser", "first_address": "192.168.1.50"})
+    assert not is_host_device({"kind": "browser", "first_address": None})
+    assert not is_host_device({"kind": "browser", "first_address": "localhost"})
+
+
+@pytest.mark.asyncio
+async def test_pairing_events_are_sent_only_to_the_host(app, client, lan_client, sender) -> None:
+    """The WebSocket half of the same leak.
+
+    `device.pending.list` carries the waiting devices' names and addresses, and
+    it used to go to every trusted device over the socket - so restricting the
+    REST endpoint alone would have left the data flowing anyway.
+    """
+    phone = await register(lan_client, "Approved phone")
+    await approve(client, sender, phone)
+
+    recipients = await host_device_ids(app.state.database.connection)
+    assert sender in recipients
+    assert phone not in recipients
+
+
+# -- what the sender sent is what arrived ---------------------------------------
+
+
+async def complete_with_hash(client, sender, receiver, payload: bytes, sha256: str | None):
+    """Create, upload and complete a transfer carrying a declared hash."""
+    created = await client.post(
+        "/api/transfers",
+        json={
+            "filename": "proof.bin",
+            "size": len(payload),
+            "receiver_id": receiver,
+            **({"sha256": sha256} if sha256 is not None else {}),
+        },
+        headers=headers(sender),
+    )
+    if created.status_code != 201:
+        return created, None
+    transfer_id = created.json()["transfer_id"]
+    chunk_size = created.json()["chunk_size"]
+    for index in range(created.json()["total_chunks"]):
+        await client.put(
+            f"/api/transfers/{transfer_id}/chunks/{index}",
+            content=payload[index * chunk_size : (index + 1) * chunk_size],
+            headers=headers(sender),
+        )
+    return await client.post(
+        f"/api/transfers/{transfer_id}/complete", headers=headers(sender)
+    ), transfer_id
+
+
+@pytest.mark.asyncio
+async def test_a_file_that_matches_the_senders_hash_completes(client, sender, receiver) -> None:
+    payload = b"the quick brown fox" * 100
+    response, _ = await complete_with_hash(
+        client, sender, receiver, payload, hashlib.sha256(payload).hexdigest()
+    )
+    assert response.status_code == 200
+    assert response.json()["sha256"] == hashlib.sha256(payload).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_a_file_that_does_not_match_is_refused_and_not_kept(
+    client, sender, receiver, settings: Settings
+) -> None:
+    """The server hashed what it assembled, and never had anything to compare it to.
+
+    `sha256` on a completed transfer has always been "what we made of the bytes
+    we received", which says nothing about whether those are the bytes the
+    sender picked. A client that can work out its own hash can now say so, and
+    a file that does not match is refused rather than filed - delivering the
+    wrong bytes under the right name is the worst available outcome.
+    """
+    payload = b"the quick brown fox" * 100
+    wrong = hashlib.sha256(b"something else entirely").hexdigest()
+
+    response, transfer_id = await complete_with_hash(client, sender, receiver, payload, wrong)
+    assert response.status_code == 409
+    assert "does not match" in response.json()["detail"]
+
+    status = await client.get(f"/api/transfers/{transfer_id}", headers=headers(sender))
+    assert status.json()["status"] == "failed"
+    assert list(settings.incoming_dir.glob("proof*")) == [], "a mismatched file was kept"
+
+
+@pytest.mark.asyncio
+async def test_a_transfer_without_a_hash_behaves_exactly_as_before(
+    client, sender, receiver
+) -> None:
+    """Most phones cannot hash: no secure context, so no crypto.subtle."""
+    payload = b"no hash here" * 50
+    response, _ = await complete_with_hash(client, sender, receiver, payload, None)
+    assert response.status_code == 200
+    assert response.json()["sha256"] == hashlib.sha256(payload).hexdigest()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", ["not-a-hash", "abc", "A" * 64, "0" * 63, "0" * 65])
+async def test_a_hash_that_is_not_one_is_refused(client, sender, receiver, value) -> None:
+    response = await client.post(
+        "/api/transfers",
+        json={"filename": "x.bin", "size": 3, "receiver_id": receiver, "sha256": value},
+        headers=headers(sender),
+    )
+    assert response.status_code == 422
+
+
+# -- the sweep keeps running --------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_sweeper_runs_while_the_server_is_up(settings: Settings) -> None:
+    """Startup-only housekeeping does nothing for a PC that is never restarted."""
+    settings.sweep_interval_hours = 0.0001  # ~0.4s, so the test is not slow
+    application = create_app(settings)
+    async with application.router.lifespan_context(application):
+        assert application.state.sweeper is not None
+
+        orphan = settings.temporary_dir / str(uuid.uuid4())
+        orphan.mkdir(parents=True, exist_ok=True)
+        (orphan / "0.part").write_bytes(b"left behind after startup")
+
+        for _ in range(40):
+            await asyncio.sleep(0.05)
+            if not orphan.exists():
+                break
+        assert not orphan.exists(), "the sweep never ran again after startup"
+
+
+@pytest.mark.asyncio
+async def test_the_sweeper_stops_with_the_server(settings: Settings) -> None:
+    """A task left running past shutdown is a leak and a noisy traceback."""
+    settings.sweep_interval_hours = 1.0
+    application = create_app(settings)
+    async with application.router.lifespan_context(application):
+        sweeper = application.state.sweeper
+        assert sweeper is not None
+    assert sweeper.cancelled() or sweeper.done()
+
+
+@pytest.mark.asyncio
+async def test_the_periodic_sweep_can_be_turned_off(settings: Settings) -> None:
+    settings.sweep_interval_hours = 0
+    application = create_app(settings)
+    async with application.router.lifespan_context(application):
+        assert application.state.sweeper is None

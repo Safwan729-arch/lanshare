@@ -127,6 +127,13 @@ class TransferCreateRequest(BaseModel):
     filename: Annotated[str, Field(min_length=1, max_length=512)]
     size: Annotated[int, Field(ge=0)]
     receiver_id: DeviceId
+    #: What the sender says the file hashes to, if it was able to work it out.
+    #:
+    #: Optional because a browser cannot hash a file on plain http - the Web
+    #: Crypto API only exists in a secure context - so most phones cannot
+    #: supply it. When it is present the server checks the assembled file
+    #: against it and refuses a mismatch.
+    sha256: Annotated[str | None, Field(default=None, pattern=r"^[0-9a-f]{64}$")] = None
     mime_type: Annotated[
         str | None, Field(default=None, max_length=255, pattern=MEDIA_TYPE_PATTERN)
     ] = None

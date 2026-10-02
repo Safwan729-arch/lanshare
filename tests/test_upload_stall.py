@@ -25,6 +25,7 @@ STALL_HARNESS = JS / "upload_stall_harness.mjs"
 FALLBACK_HARNESS = JS / "upload_fallback_harness.mjs"
 TIMEOUT_HARNESS = JS / "request_timeout_harness.mjs"
 PARTICLES_HARNESS = JS / "particles_harness.mjs"
+INTEGRITY_HARNESS = JS / "integrity_harness.mjs"
 API_JS = ROOT / "frontend" / "js" / "api.js"
 UPLOAD_JS = ROOT / "frontend" / "js" / "upload.js"
 
@@ -82,6 +83,16 @@ def test_a_call_to_a_dead_connection_fails_instead_of_hanging(frontend_as_module
     browser reuses it anyway and will not retry the POST, so without a timeout
     the upload sits on "Starting..." forever and the queue stalls behind it."""
     run_harness(TIMEOUT_HARNESS, frontend_as_modules / API_JS.name)
+
+
+@requires_node
+def test_the_pre_upload_hash_never_costs_more_than_it_is_worth(
+    frontend_as_modules: Path,
+) -> None:
+    """The integrity check is an extra. It must not read a large file into
+    memory on the happy path, and it must return nothing - not throw - on a
+    browser with no crypto.subtle, which is every phone on plain http."""
+    run_harness(INTEGRITY_HARNESS, frontend_as_modules / API_JS.name)
 
 
 @requires_node

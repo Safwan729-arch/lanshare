@@ -20,7 +20,7 @@ from fastapi import Depends, Header, Request
 
 from ..config import Settings
 from ..db.repositories import DeviceRepository
-from ..services.auth import BLOCKED, PENDING, TRUSTED, verify_token
+from ..services.auth import BLOCKED, PENDING, TRUSTED, is_host_device, verify_token
 from ..services.errors import Forbidden, Unauthorized
 from ..services.transfer_service import TransferService
 from ..ws.manager import ConnectionManager
@@ -106,6 +106,28 @@ async def require_trusted_device(
     return str(device["id"])
 
 
+async def require_host_device(
+    request: Request,
+    device: Annotated[dict[str, Any], Depends(authenticate_device)],
+) -> str:
+    """The caller must be the machine running the server. Returns its id.
+
+    Approving a device is the one decision that grants access to everything
+    else, so it belongs to the person at the keyboard of the host - which is
+    what the README has always told them to do. A trusted phone approving a
+    stranger would let one approval beget another with nobody at the host ever
+    seeing it.
+
+    Set ``LANSHARE_APPROVAL_FROM_HOST_ONLY=false`` to go back to any trusted
+    device deciding.
+    """
+    device_id = await require_trusted_device(device)
+    settings: Settings = request.app.state.settings
+    if settings.approval_from_host_only and not is_host_device(device):
+        raise Forbidden("Approve devices on the host, at http://localhost:" + str(settings.port))
+    return device_id
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 ConnectionDep = Annotated[aiosqlite.Connection, Depends(get_connection)]
 ConnectionsDep = Annotated[ConnectionManager, Depends(get_connections)]
@@ -118,3 +140,6 @@ AuthedDeviceDep = Annotated[dict[str, Any], Depends(authenticate_device)]
 
 #: An approved device. This is what everything that moves files requires.
 DeviceIdDep = Annotated[str, Depends(require_trusted_device)]
+
+#: The host itself. Pairing decisions only.
+HostDeviceDep = Annotated[str, Depends(require_host_device)]

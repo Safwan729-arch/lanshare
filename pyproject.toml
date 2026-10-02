@@ -11,7 +11,6 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
-    "python-multipart>=0.0.9",
     "aiofiles>=24.1",
     "aiosqlite>=0.20",
     "pydantic>=2.8",

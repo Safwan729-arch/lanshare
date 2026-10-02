@@ -217,13 +217,14 @@ class TransferRepository:
         receiver_id: str,
         chunk_size: int,
         total_chunks: int,
+        expected_sha256: str | None = None,
     ) -> dict[str, Any]:
         await conn.execute(
             """
             INSERT INTO transfers (
                 id, filename, mime_type, size, sender_id, receiver_id,
-                status, chunk_size, total_chunks, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+                status, chunk_size, total_chunks, created_at, expected_sha256
+            ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
             """,
             (
                 transfer_id,
@@ -235,6 +236,7 @@ class TransferRepository:
                 chunk_size,
                 total_chunks,
                 utc_now(),
+                expected_sha256,
             ),
         )
         await conn.commit()

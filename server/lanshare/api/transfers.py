@@ -41,6 +41,7 @@ async def create_transfer(
         size=payload.size,
         receiver_id=payload.receiver_id,
         mime_type=payload.mime_type,
+        expected_sha256=payload.sha256,
     )
     timing.mark("create.return", tid=str(transfer["id"])[:8], chunks=transfer["total_chunks"])
     return TransferCreateResponse(

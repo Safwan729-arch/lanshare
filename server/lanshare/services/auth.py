@@ -17,7 +17,8 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import secrets
-from typing import Final, Literal
+from collections.abc import Mapping
+from typing import Any, Final, Literal
 
 TrustState = Literal["pending", "trusted", "blocked"]
 
@@ -70,3 +71,21 @@ def is_loopback(address: str | None) -> bool:
 def initial_trust_state(client_address: str | None) -> TrustState:
     """Loopback registers as trusted; everyone else waits for approval."""
     return TRUSTED if is_loopback(client_address) else PENDING
+
+
+def is_host_device(device: Mapping[str, Any]) -> bool:
+    """Is this the machine running the server, rather than a device on the LAN?
+
+    Two ways to be the host: be the server's own row, or be a browser that
+    first registered over loopback - which is the only way a device becomes
+    trusted without anyone approving it.
+
+    This is what "approval happens on the host" is enforced against. The
+    alternative - checking the address of the request doing the approving -
+    sounds stronger but is not: the host's browser reaches the server over the
+    LAN address just as easily, and would then be refused for no good reason.
+    What matters is which machine the device *is*.
+    """
+    if device.get("kind") == "server":
+        return True
+    return is_loopback(device.get("first_address"))

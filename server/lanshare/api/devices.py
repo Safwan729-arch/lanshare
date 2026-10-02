@@ -24,6 +24,7 @@ from ..services.auth import (
     generate_token,
     hash_token,
     initial_trust_state,
+    is_host_device,
     verify_token,
 )
 from ..services.errors import Forbidden, NotFound, TooManyRequests
@@ -34,6 +35,7 @@ from .deps import (
     ConnectionDep,
     ConnectionsDep,
     DeviceIdDep,
+    HostDeviceDep,
     SettingsDep,
 )
 
@@ -116,7 +118,7 @@ async def register_device(
     logger.info("Registered device %s (%s) as %s", name, address, trust_state)
 
     if trust_state == PENDING:
-        await _notify_trusted(
+        await _notify_hosts(
             request,
             event(
                 "device.pending",
@@ -146,8 +148,12 @@ async def whoami(device: AuthedDeviceDep, connections: ConnectionsDep) -> Device
 
 
 @router.get("/pending", response_model=DeviceListResponse)
-async def list_pending(_: DeviceIdDep, conn: ConnectionDep) -> DeviceListResponse:
-    """Devices waiting for approval. Only a trusted device may look."""
+async def list_pending(_: HostDeviceDep, conn: ConnectionDep) -> DeviceListResponse:
+    """Devices waiting for approval. The host only.
+
+    It names every device waiting and the address it came from, which is of no
+    use to anyone who cannot act on it.
+    """
     rows = await DeviceRepository.list_by_trust(conn, PENDING, only_with_token=True)
     return DeviceListResponse(devices=[DeviceResponse.from_row(r, online=False) for r in rows])
 
@@ -157,11 +163,11 @@ async def decide_trust(
     device_id: DeviceIdPath,
     payload: TrustDecisionRequest,
     request: Request,
-    approver_id: DeviceIdDep,
+    approver_id: HostDeviceDep,
     conn: ConnectionDep,
     connections: ConnectionsDep,
 ) -> DeviceResponse:
-    """Approve, deny or block a device. Only a trusted device may decide."""
+    """Approve, deny or block a device. The host decides, nobody else."""
     target = await DeviceRepository.get(conn, device_id)
     if target is None:
         raise NotFound(f"No device {device_id}")
@@ -187,7 +193,7 @@ async def decide_trust(
         # Deleted, so report the state it was in when the decision was made.
         updated = {**target, "trust_state": "blocked"}
 
-    await _notify_trusted(request, await _pending_event(conn))
+    await _notify_hosts(request, await _pending_event(conn))
     return DeviceResponse.from_row(updated, online=connections.is_online(device_id))
 
 
@@ -241,11 +247,19 @@ async def _pending_event(conn: aiosqlite.Connection) -> dict[str, Any]:
     )
 
 
-async def _notify_trusted(request: Request, message: dict[str, Any]) -> None:
-    """Tell every connected device about a pairing change.
+async def host_device_ids(conn: aiosqlite.Connection) -> list[str]:
+    """Which devices are the host machine itself."""
+    rows = await DeviceRepository.list_by_trust(conn, TRUSTED)
+    return [str(row["id"]) for row in rows if is_host_device(row)]
 
-    Only trusted devices hold a socket, so this reaches exactly the devices
-    entitled to approve.
+
+async def _notify_hosts(request: Request, message: dict[str, Any]) -> None:
+    """Tell the host about a pairing change.
+
+    Broadcasting this to every trusted device was a quiet leak: the payload
+    names each waiting device and the address it registered from, and a device
+    that cannot approve anyone has no use for either.
     """
     connections: ConnectionManager = request.app.state.connections
-    await connections.broadcast(message)
+    conn = request.app.state.database.connection
+    await connections.send_many(await host_device_ids(conn), message)

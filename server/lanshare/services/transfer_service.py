@@ -9,6 +9,7 @@ import asyncio
 import contextlib
 import logging
 import math
+import secrets
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -143,6 +144,7 @@ class TransferService:
         size: int,
         receiver_id: str,
         mime_type: str | None,
+        expected_sha256: str | None = None,
     ) -> dict[str, Any]:
         if size > self._max_file_size:
             raise PayloadTooLarge(f"File is {size} bytes; the limit is {self._max_file_size} bytes")
@@ -171,6 +173,7 @@ class TransferService:
             receiver_id=receiver_id,
             chunk_size=chunk_size,
             total_chunks=total_chunks,
+            expected_sha256=expected_sha256,
         )
 
         sender = await DeviceRepository.get(self._conn, sender_id)
@@ -291,6 +294,22 @@ class TransferService:
                 transfer, event("transfer.failed", transfer_id=transfer_id, error=detail)
             )
             raise Conflict(detail) from exc
+
+        expected = transfer["expected_sha256"]
+        if expected and not secrets.compare_digest(expected, digest):
+            # The sender hashed the file before sending it and the bytes we
+            # assembled are not those bytes. Something between the two - a
+            # retry that overlapped itself, a bad disk, a client bug - lost
+            # data silently. Keeping the file would be the worst outcome: it
+            # looks delivered and it is wrong.
+            destination.unlink(missing_ok=True)
+            detail = "The file that arrived does not match what the sender hashed"
+            logger.error("Integrity check failed for transfer %s", transfer_id)
+            await TransferRepository.set_status(self._conn, transfer_id, "failed", error=detail)
+            await self._notify(
+                transfer, event("transfer.failed", transfer_id=transfer_id, error=detail)
+            )
+            raise Conflict(detail)
 
         await TransferRepository.mark_completed(
             self._conn, transfer_id, sha256=digest, stored_name=destination.name

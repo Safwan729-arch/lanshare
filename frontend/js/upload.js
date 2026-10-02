@@ -9,9 +9,10 @@ import {
   cancelTransfer,
   completeTransfer,
   createTransfer,
+  digestOf,
   getTransfer,
   uploadChunk,
-} from './api.js?v=12';
+} from './api.js?v=13';
 
 const MAX_CHUNK_ATTEMPTS = 3;
 const RETRY_BASE_MS = 600;
@@ -63,11 +64,16 @@ export class Upload {
   async start() {
     try {
       this.setStatus('starting');
+      // Null unless this browser is in a secure context and the file is small
+      // enough to hold. When it is a hash, the server refuses the transfer if
+      // what it assembled is not what we sent.
+      const sha256 = await digestOf(this.file);
       const created = await createTransfer({
         filename: this.file.name,
         size: this.file.size,
         mimeType: this.file.type,
         receiverId: this.receiverId,
+        sha256,
       });
       this.transferId = created.transfer_id;
       this.chunkSize = created.chunk_size;

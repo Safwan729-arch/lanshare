@@ -16,12 +16,12 @@ import {
   listPendingDevices,
   clearHistory,
   listTransfers,
-} from './api.js?v=12';
-import { DeviceRegistry, ensureRegistered, rename } from './devices.js?v=12';
-import { UploadQueue } from './upload.js?v=12';
-import { RealtimeConnection } from './ws.js?v=12';
-import * as ui from './ui.js?v=12';
-import { start as startParticles } from './particles.js?v=12';
+} from './api.js?v=13';
+import { DeviceRegistry, ensureRegistered, rename } from './devices.js?v=13';
+import { UploadQueue } from './upload.js?v=13';
+import { RealtimeConnection } from './ws.js?v=13';
+import * as ui from './ui.js?v=13';
+import { start as startParticles } from './particles.js?v=13';
 
 const elements = ui.cacheElements();
 const selfId = getDeviceId();

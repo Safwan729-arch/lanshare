@@ -229,9 +229,18 @@ Issuing the token up front means there is no credential to hand over after appro
 
 - The machine running the server is trusted automatically over loopback, and the host row
   cannot be blocked — you can never lock yourself out.
+- **Only the host approves.** A trusted phone can send and receive, but it cannot approve
+  the next device: one approval would otherwise quietly beget another with nobody at the
+  PC ever seeing it. Set `LANSHARE_APPROVAL_FROM_HOST_ONLY=false` if you want the old
+  behaviour.
 - **Deny** forgets a device entirely (it may ask again). **Block** remembers and refuses it.
 - Files are readable only by the **two devices in that transfer** — being approved is not the
   same as being involved.
+- Files are checked against the sender's own hash **when the sender could work one out**.
+  A browser can only hash in a secure context, so this covers the host's browser at
+  `http://localhost` (and everything, once HTTPS is on) for files up to 8 MiB; a phone on
+  plain http sends no hash and nothing is compared. A mismatch fails the transfer and the
+  file is not kept.
 - Tokens are hashed with SHA-256 and compared with `secrets.compare_digest`. Not bcrypt: these
   are 256 bits from `secrets.token_urlsafe`, so there is no dictionary to defend against and a
   slow hash would only add latency.
@@ -437,7 +446,7 @@ frontend/                # No build step, no npm, no framework
 tools/                   # Desktop launcher: LANShare.cmd, the .ps1 behind it,
                          # install-shortcut.ps1, and make_icon.py (draws the .ico)
 
-tests/                   # 304 tests
+tests/                   # 321 tests
 ```
 
 Routers stay thin, logic lives in `services/`, and **all** SQL lives in

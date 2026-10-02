@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import sys
 import uuid
@@ -168,9 +170,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         max_file_size=settings.max_file_size,
         stale_after_hours=settings.stale_transfer_hours,
     )
-    swept = await app.state.transfer_service.sweep_orphaned_chunks()
-    if swept:
-        logger.info("Removed chunks for %d transfer(s) that cannot be resumed", swept)
+    await _sweep(app)
+    app.state.sweeper = _start_sweeper(app, settings.sweep_interval_hours)
 
     app.state.server_device_id = await _ensure_server_device(app)
     app.state.lan_ip = get_lan_ip()
@@ -185,11 +186,46 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        if app.state.sweeper is not None:
+            app.state.sweeper.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await app.state.sweeper
         if app.state.udp_discovery is not None:
             await app.state.udp_discovery.stop()
         if app.state.mdns is not None:
             await app.state.mdns.stop()
         await database.close()
+
+
+async def _sweep(app: FastAPI) -> None:
+    """Delete chunks no transfer can claim any more. Never fatal."""
+    try:
+        swept = await app.state.transfer_service.sweep_orphaned_chunks()
+    except OSError:
+        # Housekeeping. A locked file or a disappearing drive is not a reason
+        # to refuse to start, or to bring a running server down.
+        logger.exception("Could not sweep abandoned chunks")
+        return
+    if swept:
+        logger.info("Removed chunks for %d transfer(s) that cannot be resumed", swept)
+
+
+def _start_sweeper(app: FastAPI, interval_hours: float) -> asyncio.Task[None] | None:
+    """Run the sweep periodically, not only at startup.
+
+    A PC that is shut down each night sweeps on every boot and needs nothing
+    else. One that stays up for weeks never would, which is precisely the
+    machine where abandoned chunks pile up.
+    """
+    if interval_hours <= 0:
+        return None
+
+    async def loop() -> None:
+        while True:
+            await asyncio.sleep(interval_hours * 3600)
+            await _sweep(app)
+
+    return asyncio.create_task(loop(), name="lanshare-chunk-sweeper")
 
 
 async def _start_mdns(settings: Settings, address: str) -> MdnsAdvertiser | None:

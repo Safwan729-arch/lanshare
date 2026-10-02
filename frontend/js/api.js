@@ -13,7 +13,7 @@
  * a stale cached page from a current one, and a browser cache turned a fixed
  * bug into a bug that looked unfixed.
  */
-const CLIENT_VERSION = '12';
+const CLIENT_VERSION = '13';
 
 const DEVICE_ID_KEY = 'lanshare.device_id';
 const DEVICE_NAME_KEY = 'lanshare.device_name';
@@ -207,7 +207,7 @@ export function decideTrust(deviceId, decision) {
   });
 }
 
-export function createTransfer({ filename, size, mimeType, receiverId }) {
+export function createTransfer({ filename, size, mimeType, receiverId, sha256 }) {
   return request('/api/transfers', {
     method: 'POST',
     headers: deviceHeaders({ 'Content-Type': 'application/json' }),
@@ -216,8 +216,45 @@ export function createTransfer({ filename, size, mimeType, receiverId }) {
       size,
       mime_type: mimeType || null,
       receiver_id: receiverId,
+      // Omitted rather than null when we could not work it out, which is the
+      // normal case on a phone: see `digestOf`.
+      ...(sha256 ? { sha256 } : {}),
     }),
   });
+}
+
+/**
+ * Largest file we will hash before sending.
+ *
+ * `crypto.subtle.digest` has no streaming form - it takes one ArrayBuffer - so
+ * hashing a file means holding all of it in memory. That is precisely what the
+ * upload path spends its complexity avoiding: it slices lazily, and the
+ * whole-file read exists only as a recovery measure after a stall, because on
+ * iOS it is what gets a tab killed (see ADR-0009).
+ *
+ * So the limit is not "what fits", it is "what costs nothing". A photo or a
+ * document is hashed; a video is not, and the server simply has no hash to
+ * check against - the same position it was in before any of this existed.
+ */
+export const INTEGRITY_LIMIT = 8 * 1024 * 1024;
+
+/**
+ * The SHA-256 of a file, or null if this browser cannot work one out.
+ *
+ * `crypto.subtle` exists only in a secure context, which on this app means
+ * HTTPS or `http://localhost`. A phone on `http://192.168.x.x` therefore never
+ * has it, and the server simply does not get a hash to check - exactly as
+ * before. Never throws: an integrity *extra* must not be able to fail a
+ * transfer that would otherwise work.
+ */
+export async function digestOf(file) {
+  if (!globalThis.crypto?.subtle || file.size > INTEGRITY_LIMIT) return null;
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return null;
+  }
 }
 
 export function getTransfer(transferId) {
