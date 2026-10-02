@@ -99,12 +99,28 @@ follows `Application startup complete`, the server did not actually start — mo
 `[Errno 10048] only one usage of each socket address`, meaning something already holds the
 port.
 
-The bare uvicorn command also works, but keep `--port` in step with `LANSHARE_PORT` or the
-printed address will point at nothing:
+A bare uvicorn command starts the app too, but do not use one: its
+`--timeout-keep-alive` defaults to 5 seconds, which is shorter than it takes a person to
+pick a video out of a phone's gallery. The browser then reuses a connection the server has
+already closed, and because a `POST` is never retried automatically, the transfer hangs on
+*Starting...* with no error. If you want auto-reload, pass the timeout yourself and keep
+`--port` in step with `LANSHARE_PORT`:
 
 ```powershell
-uvicorn lanshare.main:app --host 0.0.0.0 --port 8080 --reload --app-dir server
+uvicorn lanshare.main:app --host 0.0.0.0 --port 8080 --reload --app-dir server --timeout-keep-alive 120
 ```
+
+### One click instead of a command
+
+To start the server by double-clicking an icon, make a desktop shortcut once:
+
+```powershell
+.\tools\install-shortcut.ps1          # add -StartMenu to also find it from Start
+```
+
+The shortcut starts the server in its own window, waits until it answers, and opens the page
+in your browser. Double-clicking it again when the server is already up just opens the page
+instead of starting a second one. `install-shortcut.ps1 -Remove` deletes it.
 
 ### First run on Windows
 
@@ -391,7 +407,10 @@ frontend/                # No build step, no npm, no framework
 ├── css/styles.css
 └── js/                  # app, api, ws, upload, devices, ui (ES modules)
 
-tests/                   # 247 tests
+tools/                   # Desktop launcher: LANShare.cmd, the .ps1 behind it,
+                         # install-shortcut.ps1, and make_icon.py (draws the .ico)
+
+tests/                   # 276 tests
 ```
 
 Routers stay thin, logic lives in `services/`, and **all** SQL lives in
