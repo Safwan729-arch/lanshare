@@ -171,8 +171,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         max_file_size=settings.max_file_size,
         stale_after_hours=settings.stale_transfer_hours,
         server_device_id=app.state.server_device_id,
+        consent_timeout_seconds=settings.consent_timeout_seconds,
     )
     await _sweep(app)
+    await app.state.transfer_service.decline_abandoned_requests(grace=False)
     app.state.sweeper = _start_sweeper(app, settings.sweep_interval_hours)
 
     app.state.lan_ip = get_lan_ip()
@@ -187,6 +189,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await app.state.transfer_service.shutdown()
         if app.state.sweeper is not None:
             app.state.sweeper.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -209,6 +212,14 @@ async def _sweep(app: FastAPI) -> None:
         return
     if swept:
         logger.info("Removed chunks for %d transfer(s) that cannot be resumed", swept)
+    try:
+        expired = await app.state.transfer_service.decline_abandoned_requests()
+    except Exception:
+        # A safety net must not take the sweeper loop down with it.
+        logger.exception("Could not expire unanswered requests")
+        return
+    if expired:
+        logger.info("Declined %d request(s) nobody answered", expired)
 
 
 def _start_sweeper(app: FastAPI, interval_hours: float) -> asyncio.Task[None] | None:

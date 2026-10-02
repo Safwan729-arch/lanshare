@@ -11,6 +11,7 @@ import asyncio
 import pytest
 from conftest import approve, bring_online, headers, online, register, send_file
 from lanshare.db.repositories import DeviceRepository, TransferRepository
+from lanshare.main import create_app
 from lanshare.services.errors import Forbidden
 
 
@@ -447,3 +448,96 @@ async def test_a_file_you_send_to_your_own_pc_needs_no_permission(app, client, s
         headers=headers(sender),
     )
     assert uploaded.status_code == 200
+
+
+async def test_an_unanswered_request_expires(app, client, sender, receiver) -> None:
+    """A sender must never be left waiting on somebody who walked away."""
+    app.state.transfer_service._consent_timeout = 0.05
+    created = await client.post(
+        "/api/transfers",
+        json={"filename": "q.bin", "size": 10, "receiver_id": receiver},
+        headers=headers(sender),
+    )
+    transfer_id = created.json()["transfer_id"]
+    assert created.json()["status"] == "awaiting"
+
+    await asyncio.sleep(0.4)
+
+    status = await client.get(f"/api/transfers/{transfer_id}", headers=headers(sender))
+    assert status.json()["status"] == "declined"
+    assert status.json()["error"] == "No answer"
+
+
+async def test_answering_in_time_beats_the_timer(app, client, sender, receiver) -> None:
+    """The timer must not fire on a request that was answered."""
+    app.state.transfer_service._consent_timeout = 5
+    created = await client.post(
+        "/api/transfers",
+        json={"filename": "r.bin", "size": 10, "receiver_id": receiver},
+        headers=headers(sender),
+    )
+    transfer_id = created.json()["transfer_id"]
+
+    accepted = await client.post(
+        f"/api/transfers/{transfer_id}/consent",
+        json={"decision": "accept"},
+        headers=headers(receiver),
+    )
+    assert accepted.json()["status"] == "pending"
+    assert transfer_id not in app.state.transfer_service._consent_timers
+
+
+async def test_an_accepted_transfer_is_not_expired_later(app, client, sender, receiver) -> None:
+    """The timer fires after the decision; it must not undo it.
+
+    Worth its own test because the timer and the answer race by design: the
+    timer is armed at creation and the person answers while it is running.
+    """
+    app.state.transfer_service._consent_timeout = 0.05
+    created = await client.post(
+        "/api/transfers",
+        json={"filename": "s.bin", "size": 10, "receiver_id": receiver},
+        headers=headers(sender),
+    )
+    transfer_id = created.json()["transfer_id"]
+    await client.post(
+        f"/api/transfers/{transfer_id}/consent",
+        json={"decision": "accept"},
+        headers=headers(receiver),
+    )
+
+    await asyncio.sleep(0.4)
+
+    status = await client.get(f"/api/transfers/{transfer_id}", headers=headers(sender))
+    assert status.json()["status"] == "pending", "an answered request was expired anyway"
+
+
+async def test_a_restart_declines_what_was_still_waiting(
+    app, client, sender, receiver, settings
+) -> None:
+    """After a restart nobody is waiting for an answer - the sender gave up."""
+    created = await client.post(
+        "/api/transfers",
+        json={"filename": "t.bin", "size": 10, "receiver_id": receiver},
+        headers=headers(sender),
+    )
+    transfer_id = created.json()["transfer_id"]
+
+    restarted = create_app(settings)
+    async with restarted.router.lifespan_context(restarted):
+        row = await TransferRepository.get(restarted.state.database.connection, transfer_id)
+
+    assert row is not None
+    assert row["status"] == "declined"
+
+
+async def test_the_timers_stop_with_the_server(settings) -> None:
+    """A timer outliving its server is a leak and a traceback in the log."""
+    application = create_app(settings)
+    async with application.router.lifespan_context(application):
+        service = application.state.transfer_service
+        service._consent_timeout = 60
+        service._arm_consent_timer("11111111-1111-1111-1111-111111111111")
+        assert service._consent_timers
+
+    assert not service._consent_timers

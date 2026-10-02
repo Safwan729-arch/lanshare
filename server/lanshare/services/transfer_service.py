@@ -83,6 +83,7 @@ class TransferService:
         max_file_size: int,
         server_device_id: str,
         stale_after_hours: int = 24,
+        consent_timeout_seconds: int = 120,
     ) -> None:
         self._conn = connection
         self._storage = storage
@@ -91,6 +92,9 @@ class TransferService:
         self._max_file_size = max_file_size
         self._stale_after_hours = stale_after_hours
         self._server_device_id = server_device_id
+        self._consent_timeout: float = consent_timeout_seconds
+        #: One timer per waiting request, cancelled by an answer or by shutdown.
+        self._consent_timers: dict[str, asyncio.Task[None]] = {}
         # One lock per transfer being completed. Two concurrent completes both
         # pass the "already completed?" check, both assemble, and the loser
         # finds the chunks already cleaned up - so it marks a transfer that
@@ -223,6 +227,9 @@ class TransferService:
             )
             return transfer
 
+        # Armed only here: a self-sent transfer came out `pending` above and
+        # has nobody to wait for.
+        self._arm_consent_timer(transfer["id"])
         sender = await DeviceRepository.get(self._conn, sender_id)
         await self._connections.send_many(
             audience,
@@ -307,14 +314,80 @@ class TransferService:
             )
             if not moved:
                 raise Conflict("That request was already answered")
+            self._cancel_consent_timer(transfer_id)
             await self._notify(
                 transfer, event("transfer.accepted", transfer_id=transfer_id, by=device_id)
             )
             logger.info("Transfer %s accepted by %s", transfer_id, device_id)
         elif not await self._decline(transfer, reason="Declined", by=device_id):
             raise Conflict("That request was already answered")
+        else:
+            self._cancel_consent_timer(transfer_id)
 
         return await self._require(transfer_id)
+
+    def _arm_consent_timer(self, transfer_id: str) -> None:
+        """Decline a request nobody answers, so the sender is never left hanging."""
+
+        async def expire() -> None:
+            try:
+                await asyncio.sleep(self._consent_timeout)
+                transfer = await TransferRepository.get(self._conn, transfer_id)
+                if transfer is not None and transfer["status"] == AWAITING:
+                    await self._decline(transfer, reason="No answer")
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # pragma: no cover - a timer must not kill the loop
+                logger.exception("Consent timer failed for %s", transfer_id)
+            finally:
+                self._consent_timers.pop(transfer_id, None)
+
+        self._consent_timers[transfer_id] = asyncio.create_task(
+            expire(), name=f"consent-{transfer_id[:8]}"
+        )
+
+    def _cancel_consent_timer(self, transfer_id: str) -> None:
+        task = self._consent_timers.pop(transfer_id, None)
+        if task is not None:
+            task.cancel()
+
+    async def shutdown(self) -> None:
+        """Stop the timers, so none outlives the server that armed it."""
+        tasks = list(self._consent_timers.values())
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        self._consent_timers.clear()
+
+    async def decline_abandoned_requests(self, *, grace: bool = True) -> int:
+        """Decline requests nobody answered. Runs at startup and in the sweep.
+
+        A row left `awaiting` by a restart has nobody waiting on it: the
+        sender's page gave up long ago, and the timer that would have expired it
+        died with the old process. Showing the recipient a prompt for a file
+        that is no longer coming is worse than dropping it.
+
+        `grace=False` at startup, because a row that survived a restart is stale
+        whatever its age - nothing is left to catch it. The periodic sweep keeps
+        the grace period, so it never cancels a decision being made right now.
+        """
+        cutoff = datetime.now(UTC)
+        if grace:
+            cutoff -= timedelta(seconds=self._consent_timeout)
+        else:
+            # created_at has one-second resolution and the query is a strict
+            # `<`, so "now" would miss a row written in this very second.
+            cutoff += timedelta(seconds=1)
+        stale = await TransferRepository.stale_active(
+            self._conn, active=(AWAITING,), before=cutoff.isoformat(timespec="seconds")
+        )
+        declined = 0
+        for transfer in stale:
+            if await self._decline(transfer, reason="No answer"):
+                declined += 1
+        return declined
 
     async def _decline(
         self, transfer: dict[str, Any], *, reason: str, by: str | None = None
