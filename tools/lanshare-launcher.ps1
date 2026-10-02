@@ -33,15 +33,41 @@ function Fail($message, $hint) {
     exit 1
 }
 
+function Test-Port($value) {
+    # Validated because the port is pasted into a URL. `8080@elsewhere` would
+    # make `elsewhere` the host and the loopback address the *userinfo*, so the
+    # health probe would leave the machine - and a 200 from it would be read as
+    # "already running" and opened in the browser. Five digits at most, so the
+    # range check below cannot overflow the cast.
+    if ($value -notmatch '^\d{1,5}$') { return $false }
+    $number = [int]$value
+    return ($number -ge 1 -and $number -le 65535)
+}
+
 function Get-Port {
     # The address shown to the user has to match the port the server binds, so
     # this reads the same two sources config.py does, in the same order.
-    if ($env:LANSHARE_PORT) { return $env:LANSHARE_PORT }
+    $hint = @'
+Set LANSHARE_PORT to a number between 1 and 65535, or clear it to fall back to
+.env (or to 8080).
+'@
+    if ($env:LANSHARE_PORT) {
+        if (-not (Test-Port $env:LANSHARE_PORT)) {
+            Fail "LANSHARE_PORT is not a port number: $($env:LANSHARE_PORT)" $hint
+        }
+        return $env:LANSHARE_PORT
+    }
     $envFile = Join-Path $root '.env'
     if (Test-Path $envFile) {
         $match = Select-String -Path $envFile -Pattern '^\s*LANSHARE_PORT\s*=\s*(\d+)' |
             Select-Object -First 1
-        if ($match) { return $match.Matches[0].Groups[1].Value }
+        if ($match) {
+            $value = $match.Matches[0].Groups[1].Value
+            if (-not (Test-Port $value)) {
+                Fail "LANSHARE_PORT in .env is not a port number: $value" $hint
+            }
+            return $value
+        }
     }
     return '8080'
 }
@@ -86,7 +112,10 @@ Write-Step 'starting the server'
 # place to read the QR and the log, and an untitled "python" in the taskbar is
 # the thing people lose. The interpreter and its arguments are unchanged, so the
 # ADR-0011 rule above still holds - `title` runs and exits, then python -m runs.
-Start-Process -FilePath $env:ComSpec -WorkingDirectory $root -ArgumentList @(
+# cmd.exe comes from the OS, not from ComSpec: that variable is writable, and
+# whoever set it would be choosing what this launcher runs.
+$shell = Join-Path ([System.Environment]::SystemDirectory) 'cmd.exe'
+Start-Process -FilePath $shell -WorkingDirectory $root -ArgumentList @(
     # No space before the `&`: cmd's `title` takes the rest of its command, so
     # a space there ends up in the window title.
     '/c', 'title LANShare server&', "`"$python`"", '-m', 'lanshare'

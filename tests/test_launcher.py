@@ -387,3 +387,49 @@ def test_the_stopper_stops_a_server_started_by_the_shortcut(tmp_path: Path) -> N
         assert result.returncode == 0, result.stdout + result.stderr
         assert "not LANShare" not in result.stdout, "it did not recognise its own server"
         assert not health(port), "the server still answers"
+
+
+# --- A port is a number ---------------------------------------------------
+#
+# Only `.env` was validated. An unvalidated value reaches a URL as
+# "http://127.0.0.1:<value>/api/health", and a value like `8080@elsewhere`
+# makes `elsewhere` the host and the loopback address the userinfo - so the
+# probe leaves the machine, and a 200 from it would be read as "already
+# running" and opened in the browser. `.invalid` never resolves (RFC 2606),
+# so these tests cannot reach anything even if the check is removed.
+
+BAD_PORTS = ["8080@localhost.invalid", "80 80", "0", "99999", "-1", "8080/x"]
+# Never the empty string: that is an *unset* port, which falls back to the real
+# 8080 - and a test that runs either script against the real port starts or
+# stops the user's own server. The fallback chain is covered statically.
+
+
+def run_script(script: Path, port: str) -> subprocess.CompletedProcess[str]:
+    env = {**os.environ, "LANSHARE_PORT": port}
+    return subprocess.run(
+        [str(powershell), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+
+
+@pytest.mark.skipif(powershell is None, reason="powershell is not installed")
+@pytest.mark.parametrize("script", [LAUNCHER, STOPPER], ids=lambda p: p.name)
+@pytest.mark.parametrize("port", BAD_PORTS)
+def test_a_port_that_is_not_a_number_is_refused(script: Path, port: str) -> None:
+    result = run_script(script, port)
+
+    assert result.returncode != 0, f"{port!r} was accepted:\n{result.stdout}"
+    assert "LANSHARE_PORT" in result.stdout, "the refusal has to name the variable"
+    # Refused before anything is probed, started or stopped.
+    for verb in ("starting the server", "opening", "stopping pid"):
+        assert verb not in result.stdout.lower()
+
+
+def test_the_scripts_do_not_take_the_shell_from_the_environment() -> None:
+    """ComSpec is writable; whoever sets it would choose what the launcher runs."""
+    code = code_lines(read(LAUNCHER))
+    assert "ComSpec" not in code
+    assert "SystemDirectory" in code, "take cmd.exe from the OS, not from an env var"

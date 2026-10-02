@@ -23,15 +23,46 @@ function Write-Step($message) {
     Write-Host "  $message" -ForegroundColor DarkGray
 }
 
+function Fail($message) {
+    Write-Host ''
+    Write-Host '  LANShare could not stop the server' -ForegroundColor Red
+    Write-Host "  $message"
+    Write-Host ''
+    Write-Host '  Set LANSHARE_PORT to a number between 1 and 65535, or clear it to' -ForegroundColor Yellow
+    Write-Host '  fall back to .env (or to 8080).' -ForegroundColor Yellow
+    Write-Host ''
+    exit 1
+}
+
+function Test-Port($value) {
+    # The port decides what gets stopped, so a value that is not a port must be
+    # refused rather than coerced. Five digits at most, so the range check
+    # cannot overflow the cast.
+    if ($value -notmatch '^\d{1,5}$') { return $false }
+    $number = [int]$value
+    return ($number -ge 1 -and $number -le 65535)
+}
+
 function Get-Port {
     # The same two sources config.py reads, in the same order, so this looks at
     # the port the server actually bound.
-    if ($env:LANSHARE_PORT) { return $env:LANSHARE_PORT }
+    if ($env:LANSHARE_PORT) {
+        if (-not (Test-Port $env:LANSHARE_PORT)) {
+            Fail "LANSHARE_PORT is not a port number: $($env:LANSHARE_PORT)"
+        }
+        return $env:LANSHARE_PORT
+    }
     $envFile = Join-Path $root '.env'
     if (Test-Path $envFile) {
         $match = Select-String -Path $envFile -Pattern '^\s*LANSHARE_PORT\s*=\s*(\d+)' |
             Select-Object -First 1
-        if ($match) { return $match.Matches[0].Groups[1].Value }
+        if ($match) {
+            $value = $match.Matches[0].Groups[1].Value
+            if (-not (Test-Port $value)) {
+                Fail "LANSHARE_PORT in .env is not a port number: $value"
+            }
+            return $value
+        }
     }
     return '8080'
 }
