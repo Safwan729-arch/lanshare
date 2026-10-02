@@ -10,6 +10,7 @@ import hashlib
 import logging
 import re
 import shutil
+import uuid
 from collections.abc import AsyncIterator
 from itertools import chain
 from pathlib import Path
@@ -145,7 +146,13 @@ class Storage:
         directory.mkdir(parents=True, exist_ok=True)
 
         final = self.chunk_path(transfer_id, index)
-        staging = final.with_suffix(".tmp")
+        # One staging file per request, not per index. A retry can overlap the
+        # attempt it replaces - the client gives up on a stalled chunk while the
+        # server is still reading it - and a shared staging name means the two
+        # bodies interleave into a chunk of the right length and the wrong
+        # contents, or, on Windows, that the second write cannot open the file
+        # at all. Whichever request finishes last now wins the rename whole.
+        staging = final.with_name(f"{final.stem}.{uuid.uuid4().hex}.tmp")
         written = 0
 
         try:
@@ -162,6 +169,21 @@ class Storage:
 
         staging.replace(final)
         return written
+
+    def transfer_dirs(self) -> list[Path]:
+        """Every chunk directory on disk that could belong to a transfer.
+
+        Only names shaped like a transfer id: the temporary directory is a real
+        folder on someone's machine, and a sweep must never touch something it
+        cannot account for.
+        """
+        if not self.temporary_dir.is_dir():
+            return []
+        return sorted(
+            path
+            for path in self.temporary_dir.iterdir()
+            if path.is_dir() and _TRANSFER_ID.match(path.name)
+        )
 
     def received_chunks(self, transfer_id: str) -> list[int]:
         """Which chunk indexes are on disk. Derived from the filesystem so a

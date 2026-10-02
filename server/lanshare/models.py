@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
@@ -9,6 +10,28 @@ from pydantic import BaseModel, Field
 # Device ids are UUIDs generated in the browser; accept any hex/dash token so a
 # hand-written client is not forced into a specific UUID version.
 DeviceId = Annotated[str, Field(pattern=r"^[0-9a-fA-F-]{8,64}$")]
+
+# A media type the sender picked, which the download echoes back as the
+# response's Content-Type. RFC 9110 tokens, with unquoted parameters - which is
+# all a browser's `File.type` ever produces.
+#
+# This is not pedantry. uvicorn refuses to put a CR or LF in a header value, but
+# it refuses at *send* time: an upload with a newline in its media type finishes
+# happily and then every download of it dies, for ever, for the receiver. The
+# value is checked where it arrives instead.
+_TOKEN = r"[A-Za-z0-9!#$%&'*+.^_`|~-]+"
+MEDIA_TYPE_PATTERN = rf"^{_TOKEN}/{_TOKEN}(?: *; *{_TOKEN}={_TOKEN})*$"
+_MEDIA_TYPE = re.compile(MEDIA_TYPE_PATTERN)
+
+
+def is_sendable_media_type(value: str | None) -> bool:
+    """Can this value safely become a ``Content-Type`` header?
+
+    Used on the way out as well as the way in: a row stored before this check
+    existed must still be downloadable, just not with its broken value.
+    """
+    return value is not None and _MEDIA_TYPE.match(value) is not None
+
 
 TransferStatus = Literal["pending", "uploading", "completed", "failed", "cancelled"]
 TrustState = Literal["pending", "trusted", "blocked"]
@@ -104,7 +127,9 @@ class TransferCreateRequest(BaseModel):
     filename: Annotated[str, Field(min_length=1, max_length=512)]
     size: Annotated[int, Field(ge=0)]
     receiver_id: DeviceId
-    mime_type: Annotated[str | None, Field(default=None, max_length=255)] = None
+    mime_type: Annotated[
+        str | None, Field(default=None, max_length=255, pattern=MEDIA_TYPE_PATTERN)
+    ] = None
 
 
 class ClearHistoryResponse(BaseModel):

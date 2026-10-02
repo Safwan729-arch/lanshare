@@ -291,6 +291,24 @@ class TransferRepository:
         return removed
 
     @staticmethod
+    async def stale_active(
+        conn: aiosqlite.Connection, *, active: tuple[str, ...], before: str
+    ) -> list[dict[str, Any]]:
+        """Unfinished transfers older than ``before`` (an ISO-8601 UTC string).
+
+        Timestamps are stored as ISO-8601 UTC, which sorts lexically, so a
+        string comparison is a date comparison here.
+        """
+        placeholders = ", ".join("?" * len(active))
+        query = f"""
+            SELECT * FROM transfers
+            WHERE status IN ({placeholders}) AND created_at < ?
+            ORDER BY created_at
+        """
+        async with conn.execute(query, (*active, before)) as cur:
+            return _rows(await cur.fetchall())
+
+    @staticmethod
     async def set_status(
         conn: aiosqlite.Connection, transfer_id: str, status: str, *, error: str | None = None
     ) -> None:

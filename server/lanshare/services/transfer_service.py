@@ -11,6 +11,7 @@ import logging
 import math
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
@@ -69,12 +70,14 @@ class TransferService:
         connections: ConnectionManager,
         chunk_size: int,
         max_file_size: int,
+        stale_after_hours: int = 24,
     ) -> None:
         self._conn = connection
         self._storage = storage
         self._connections = connections
         self._chunk_size = chunk_size
         self._max_file_size = max_file_size
+        self._stale_after_hours = stale_after_hours
         # One lock per transfer being completed. Two concurrent completes both
         # pass the "already completed?" check, both assemble, and the loser
         # finds the chunks already cleaned up - so it marks a transfer that
@@ -340,8 +343,69 @@ class TransferService:
             self._conn, device_id=device_id, active=tuple(sorted(ACTIVE_STATUSES))
         )
         for transfer_id in removed:
-            self._storage.cleanup(transfer_id)
+            # rmtree is blocking, and clearing a long history is many of them.
+            await run_in_threadpool(self._storage.cleanup, transfer_id)
         return len(removed)
+
+    async def sweep_orphaned_chunks(self) -> int:
+        """Delete chunks no transfer can still claim. Returns how many went.
+
+        A cancelled transfer cleans up after itself, but a browser that is
+        closed mid-upload cancels nothing: the row stays `uploading` and its
+        partial chunks sit on disk until someone notices. Directories whose row
+        has gone entirely - cleared history, a deleted database - are worse,
+        because nothing will ever look for them again.
+
+        Called at startup, which is the one moment when nothing can be in
+        flight. A transfer that is still active and still young is left alone:
+        a server restarted under an open page can still be resumed by it, and
+        its chunks are the whole point.
+        """
+        await self._fail_abandoned()
+
+        swept = 0
+        for directory in self._storage.transfer_dirs():
+            transfer = await TransferRepository.get(self._conn, directory.name)
+            if transfer is not None and transfer["status"] in ACTIVE_STATUSES:
+                continue
+            await run_in_threadpool(self._storage.cleanup, directory.name)
+            swept += 1
+        return swept
+
+    async def _fail_abandoned(self) -> None:
+        """Give up on uploads nobody can finish, so the sweep can collect them.
+
+        Resume lives in the page: the browser keeps the transfer id in memory
+        and never writes it down, so once the tab is gone the upload is gone
+        too - the next attempt creates a new transfer. Without this, every
+        interrupted upload keeps its partial chunks for the life of the
+        installation, and the row sits in the history claiming to be in
+        progress for ever.
+
+        The window is generous on purpose. The only thing it protects is an
+        upload whose page is still open while the server restarts underneath
+        it, which is a real case - it happened twice while this project was
+        being debugged.
+        """
+        cutoff = datetime.now(UTC) - timedelta(hours=self._stale_after_hours)
+        stale = await TransferRepository.stale_active(
+            self._conn,
+            active=tuple(sorted(ACTIVE_STATUSES)),
+            before=cutoff.isoformat(timespec="seconds"),
+        )
+        for transfer in stale:
+            await TransferRepository.set_status(
+                self._conn,
+                transfer["id"],
+                "failed",
+                error="Abandoned before it finished",
+            )
+            logger.info(
+                "Transfer %s was still %s from %s; marking it failed",
+                transfer["id"],
+                transfer["status"],
+                transfer["created_at"],
+            )
 
     # -- download ------------------------------------------------------------
 

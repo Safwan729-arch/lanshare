@@ -247,6 +247,24 @@ once, and loopback is exempt so a flood can never stop you approving your own ph
 > files" to "someone has to be approved once". It is **not** protection against an attacker
 > already capturing packets on your LAN. For that, turn on HTTPS.
 
+### Which hostnames the server answers to
+
+The server refuses, with `400`, any request whose `Host` header is an ordinary registrable
+domain. Addresses, single-label machine names and the reserved local suffixes (`.local`,
+`.lan`, `.home.arpa`, `.internal`) are accepted, so every address this README tells you to
+use keeps working.
+
+This blocks **DNS rebinding**. A page on the internet cannot read a response from
+`http://127.0.0.1:8080` - the same-origin policy forbids it - but it can point a domain it
+owns at `127.0.0.1` after the page has loaded and then call the server as
+`http://its-own-domain:8080`, which the browser treats as same-origin. The request arrives
+from loopback, and loopback is trusted on sight here, so without this check such a page
+would be issued a token for a trusted device: your device list, your transfer history and
+every file you have received.
+
+If you reach LANShare through a real domain name - a reverse proxy, a Tailscale address -
+list it in `LANSHARE_ALLOWED_HOSTS` (comma-separated).
+
 ## Finding the server
 
 Three independent mechanisms, none of which a transfer depends on:
@@ -419,7 +437,7 @@ frontend/                # No build step, no npm, no framework
 tools/                   # Desktop launcher: LANShare.cmd, the .ps1 behind it,
                          # install-shortcut.ps1, and make_icon.py (draws the .ico)
 
-tests/                   # 277 tests
+tests/                   # 304 tests
 ```
 
 Routers stay thin, logic lives in `services/`, and **all** SQL lives in

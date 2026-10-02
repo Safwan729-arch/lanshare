@@ -29,6 +29,7 @@ from .db.repositories import DeviceRepository, SettingsRepository
 from .discovery.mdns import MdnsAdvertiser
 from .discovery.qr import qr_svg, qr_terminal
 from .discovery.udp import UdpDiscovery
+from .middleware import LocalHostsOnly
 from .models import DeviceResponse
 from .services.auth import TRUSTED, verify_token
 from .services.errors import LanShareError
@@ -165,7 +166,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         connections=app.state.connections,
         chunk_size=settings.chunk_size,
         max_file_size=settings.max_file_size,
+        stale_after_hours=settings.stale_transfer_hours,
     )
+    swept = await app.state.transfer_service.sweep_orphaned_chunks()
+    if swept:
+        logger.info("Removed chunks for %d transfer(s) that cannot be resumed", swept)
+
     app.state.server_device_id = await _ensure_server_device(app)
     app.state.lan_ip = get_lan_ip()
     app.state.lan_url = build_lan_url(settings.port, app.state.lan_ip, secure=settings.enable_https)
@@ -238,6 +244,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = settings or get_settings()
+
+    # Outermost check, before routing: a page that reached us under someone
+    # else's domain name is a DNS rebinding attempt. See `middleware.py`.
+    app.add_middleware(LocalHostsOnly, allowed=app.state.settings.allowed_hosts)
 
     @app.exception_handler(LanShareError)
     async def _handle_service_error(_: Request, exc: LanShareError) -> JSONResponse:

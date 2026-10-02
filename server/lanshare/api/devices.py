@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from typing import Annotated, Any
 
 import aiosqlite
@@ -96,15 +97,22 @@ async def register_device(
                 "approve or deny some on the host first"
             )
 
-    device = await DeviceRepository.create(
-        conn,
-        device_id=payload.device_id,
-        name=name,
-        user_agent=payload.user_agent,
-        trust_state=trust_state,
-        token_hash=hash_token(token),
-        first_address=address,
-    )
+    try:
+        device = await DeviceRepository.create(
+            conn,
+            device_id=payload.device_id,
+            name=name,
+            user_agent=payload.user_agent,
+            trust_state=trust_state,
+            token_hash=hash_token(token),
+            first_address=address,
+        )
+    except sqlite3.IntegrityError as exc:
+        # Two registrations of the same new id, in flight at once: both looked,
+        # both found nothing, both inserted. The loser used to escape as an
+        # unhandled error and a 500. It is the same situation as a slower
+        # duplicate, so it gets the same answer.
+        raise Forbidden("That device id is taken; clear local data and register again") from exc
     logger.info("Registered device %s (%s) as %s", name, address, trust_state)
 
     if trust_state == PENDING:

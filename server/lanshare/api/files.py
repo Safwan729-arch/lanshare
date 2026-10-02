@@ -8,6 +8,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Path
 from fastapi.responses import FileResponse
 
+from ..models import is_sendable_media_type
 from .deps import DeviceIdDep, ServiceDep
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -38,8 +39,12 @@ async def download_file(
     by guessing or overhearing a transfer id.
     """
     path, transfer = await service.resolve_download(transfer_id, device_id=device_id)
+    # Checked again on the way out, not only on the way in: a row stored before
+    # that check existed would otherwise be undownloadable for ever, since
+    # uvicorn rejects the header and the receiver cannot edit the value.
+    stored_type = transfer["mime_type"]
     return FileResponse(
         path,
-        media_type=transfer["mime_type"] or DEFAULT_MIME,
+        media_type=stored_type if is_sendable_media_type(stored_type) else DEFAULT_MIME,
         headers={"Content-Disposition": content_disposition(transfer["filename"])},
     )

@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     port: int = 8080
     server_name: str = "LANShare PC"
 
+    #: Extra hostnames this server may be reached under.
+    #:
+    #: Addresses, single-label machine names and reserved local suffixes
+    #: (.local, .lan, ...) are always accepted. A real registrable domain is
+    #: not, because that is what a DNS rebinding attack needs - so if you front
+    #: this with one, name it here. Comma-separated.
+    allowed_hosts: list[str] = Field(default_factory=list)
+
     incoming_dir: Path = Path("storage/incoming")
     temporary_dir: Path = Path("storage/temporary")
     data_dir: Path = Path("data")
@@ -80,6 +88,16 @@ class Settings(BaseSettings):
     # A device is "online" only while it holds a WebSocket connection, but we
     # keep rows around this long so history can still name the device.
     device_retention_days: int = 30
+
+    #: How long an unfinished transfer keeps its chunks.
+    #:
+    #: Resume lives in the page: the browser holds the transfer id in memory
+    #: and never writes it down, so a closed tab can never pick an upload back
+    #: up - it starts a new transfer instead. The chunks of the old one would
+    #: otherwise sit on disk for ever. The window exists only so that
+    #: restarting the server under an open page does not throw away an upload
+    #: that page can still finish.
+    stale_transfer_hours: int = Field(default=24, ge=1)
 
     #: How many devices may sit unapproved at once.
     #:
@@ -113,6 +131,14 @@ class Settings(BaseSettings):
     peer_ttl_seconds: float = Field(default=35.0, ge=5.0, le=600.0)
 
     frontend_dir: Path = Path("frontend")
+
+    @field_validator("allowed_hosts", mode="before")
+    @classmethod
+    def _split_hosts(cls, value: object) -> object:
+        """Accept `a.example.com, b.example.com` as well as a JSON list."""
+        if isinstance(value, str):
+            return [entry.strip() for entry in value.split(",") if entry.strip()]
+        return value
 
     @field_validator("incoming_dir", "temporary_dir", "data_dir", "frontend_dir")
     @classmethod
