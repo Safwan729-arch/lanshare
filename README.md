@@ -145,6 +145,10 @@ profile.
    Safari or Chrome. On an iPhone or Mac, `http://lanshare.local:8080` works too.
 3. **Approve the new device.** The phone shows *Waiting for approval*. On the PC open
    **`http://localhost:8080`** — not the LAN address — and press **Allow**.
+
+> **Keep the PC's page open.** It is where you accept files sent to the PC, and with it
+> closed a phone is told the PC isn't connected rather than quietly dropping a file on your
+> disk. The desktop shortcut opens it for you.
 4. Both devices now appear in each other's **Send to** list.
 5. Pick a device, choose files, watch the progress bar.
 6. The receiver gets a **Save file** button. Files also land in `storage/incoming/` on the PC.
@@ -229,6 +233,12 @@ Issuing the token up front means there is no credential to hand over after appro
 
 - The machine running the server is trusted automatically over loopback, and the host row
   cannot be blocked — you can never lock yourself out.
+- **Every file is offered, not delivered.** A device you have approved can still only
+  *ask*. The file waits as an offer until the device it was sent to presses Accept, and
+  nothing is written to disk before that - refuse it and not a byte was uploaded. An offer
+  nobody answers expires after two minutes and the sender is told. A file you send from the
+  PC's own page to the PC is accepted on creation: you are the only one who could answer,
+  and you already decided by pressing Send.
 - **Only the host approves.** A trusted phone can send and receive, but it cannot approve
   the next device: one approval would otherwise quietly beget another with nobody at the
   PC ever seeing it. Set `LANSHARE_APPROVAL_FROM_HOST_ONLY=false` if you want the old
@@ -446,7 +456,7 @@ frontend/                # No build step, no npm, no framework
 tools/                   # Desktop launcher: LANShare.cmd, the .ps1 behind it,
                          # install-shortcut.ps1, and make_icon.py (draws the .ico)
 
-tests/                   # 321 tests
+tests/                   # 357 tests
 ```
 
 Routers stay thin, logic lives in `services/`, and **all** SQL lives in
