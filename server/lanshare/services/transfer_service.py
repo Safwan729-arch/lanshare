@@ -23,7 +23,7 @@ from .. import timing
 from ..config import MAX_CHUNK_SIZE
 from ..db.repositories import DeviceRepository, TransferRepository
 from ..ws.manager import ConnectionManager, event
-from .auth import TRUSTED
+from .auth import TRUSTED, is_host_device
 from .errors import BadRequest, Conflict, Forbidden, NotFound, PayloadTooLarge
 from .storage import Storage, StorageError, sanitize_filename
 
@@ -83,6 +83,7 @@ class TransferService:
         chunk_size: int,
         max_file_size: int,
         stale_after_hours: int = 24,
+        server_device_id: str | None = None,
     ) -> None:
         self._conn = connection
         self._storage = storage
@@ -90,6 +91,9 @@ class TransferService:
         self._chunk_size = chunk_size
         self._max_file_size = max_file_size
         self._stale_after_hours = stale_after_hours
+        # Set by the lifespan once the host's own row exists. Until then no
+        # transfer can be addressed to it anyway.
+        self._server_device_id = server_device_id
         # One lock per transfer being completed. Two concurrent completes both
         # pass the "already completed?" check, both assemble, and the loser
         # finds the chunks already cleaned up - so it marks a transfer that
@@ -138,7 +142,7 @@ class TransferService:
         return received, missing
 
     async def _notify(self, transfer: dict[str, Any], message: dict[str, Any]) -> None:
-        await self._connections.send_many([transfer["sender_id"], transfer["receiver_id"]], message)
+        await self._connections.send_many(await self._audience(transfer), message)
 
     @staticmethod
     def _expected_chunk_size(transfer: dict[str, Any], index: int) -> int:
@@ -265,6 +269,36 @@ class TransferService:
         """
         if device_id not in (transfer["sender_id"], transfer["receiver_id"]):
             raise Forbidden("This transfer does not involve your device")
+
+    async def require_may_answer(self, transfer: dict[str, Any], device_id: str) -> None:
+        """Only the device a file was sent to may accept or refuse it.
+
+        With one exception, and it is not a loophole: a file addressed to the PC
+        names the server's own device row, which holds no WebSocket and has no
+        browser behind it. The host's page at localhost is a *different* device,
+        so it answers on the server row's behalf - the same definition of "host"
+        that decides who may approve a pairing.
+        """
+        if device_id == transfer["receiver_id"]:
+            return
+        if transfer["receiver_id"] == self._server_device_id:
+            device = await DeviceRepository.get(self._conn, device_id)
+            if device is not None and is_host_device(device):
+                return
+        raise Forbidden("Only the device a file was sent to may answer for it")
+
+    async def _audience(self, transfer: dict[str, Any]) -> list[str]:
+        """Which devices hear about this transfer.
+
+        Normally the two parties. For a transfer addressed to the PC the
+        receiver is a row nothing is listening on, so the host devices hear it
+        instead - otherwise the page where the decision is made would never be
+        told there was one to make.
+        """
+        if transfer["receiver_id"] != self._server_device_id:
+            return [transfer["sender_id"], transfer["receiver_id"]]
+        hosts = await DeviceRepository.list_hosts(self._conn)
+        return [transfer["sender_id"], *(str(row["id"]) for row in hosts)]
 
     async def complete(self, *, transfer_id: str, sender_id: str) -> dict[str, Any]:
         """Assemble, hash and file the upload. Safe to call more than once."""

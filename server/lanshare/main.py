@@ -162,6 +162,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         incoming_dir=settings.incoming_dir,
         temporary_dir=settings.temporary_dir,
     )
+    app.state.server_device_id = await _ensure_server_device(app)
     app.state.transfer_service = TransferService(
         connection=database.connection,
         storage=app.state.storage,
@@ -169,11 +170,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         chunk_size=settings.chunk_size,
         max_file_size=settings.max_file_size,
         stale_after_hours=settings.stale_transfer_hours,
+        server_device_id=app.state.server_device_id,
     )
     await _sweep(app)
     app.state.sweeper = _start_sweeper(app, settings.sweep_interval_hours)
 
-    app.state.server_device_id = await _ensure_server_device(app)
     app.state.lan_ip = get_lan_ip()
     app.state.lan_url = build_lan_url(settings.port, app.state.lan_ip, secure=settings.enable_https)
     app.state.qr_svg = qr_svg(app.state.lan_url)
