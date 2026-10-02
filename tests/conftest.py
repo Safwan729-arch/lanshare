@@ -61,7 +61,7 @@ async def app(settings: Settings) -> AsyncIterator[FastAPI]:
         async with application.router.lifespan_context(application):
             yield application
     finally:
-        CURRENT_APP.clear()
+        CURRENT_APP.remove(application)
 
 
 @pytest_asyncio.fixture
@@ -133,6 +133,10 @@ async def accept(transfer_id: str, receiver_id: str) -> None:
 
     A file addressed to the PC has no browser behind its row, so it is the host's
     page that answers: a loopback device, which the app treats as the host.
+
+    Side effect to know about: that host page is a brand-new device, registered
+    on every PC-addressed call. A test that counts devices or asserts an exact
+    `device.list` will see the extras.
     """
     app = CURRENT_APP[-1]
     if receiver_id == app.state.server_device_id:
@@ -170,6 +174,11 @@ async def send_file(
 
     ``skip`` leaves those chunk indexes unsent, which is how the resume tests
     create a half-finished upload.
+
+    This does more than it says: it brings the receiver online and accepts the
+    transfer on its behalf (unless the server already started it `pending`, as
+    for a host sending to its own PC). A test that wants to observe the consent
+    gate must therefore post to `/api/transfers` itself rather than use this.
     """
     skip = skip or set()
     if receiver_id != CURRENT_APP[-1].state.server_device_id:
@@ -189,7 +198,8 @@ async def send_file(
     transfer_id = body["transfer_id"]
     chunk_size = body["chunk_size"]
 
-    await accept(transfer_id, receiver_id)
+    if body["status"] == "awaiting":
+        await accept(transfer_id, receiver_id)
 
     for index in range(body["total_chunks"]):
         if index in skip:

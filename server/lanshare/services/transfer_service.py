@@ -11,7 +11,7 @@ import logging
 import math
 import secrets
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
@@ -178,6 +178,26 @@ class TransferService:
                 f"{receiver['name']} isn't connected. Open LANShare on it and try again."
             )
 
+        # Consent protects a person from *other people's* files. If the only
+        # device that could answer is the sender itself - the host's page
+        # sending into the PC's own storage - then the person who pressed Send
+        # is the person who would be asked, so the send already is the consent.
+        # Prompting would be ceremony, and worse, nobody would see it: the
+        # sender is left out of the announcement below, so the request would sit
+        # `awaiting` until it expired. Do not "simplify" this into always
+        # starting as awaiting.
+        parties = {"sender_id": sender_id, "receiver_id": receiver_id}
+        audience = [d for d in await self._audience(parties) if d != sender_id]
+        status = "awaiting"
+        # "Anyone to ask" means someone with a page open: the audience for a
+        # PC-addressed file lists the server's own row too, which has no socket.
+        if not any(self._connections.is_online(d) for d in audience):
+            try:
+                await self.require_may_answer(parties, sender_id)
+                status = "pending"
+            except Forbidden:
+                pass
+
         safe_name = sanitize_filename(filename)
         # Per transfer, not global: the client uses whatever we return here.
         chunk_size = chunk_size_for(size, base=self._chunk_size)
@@ -194,10 +214,16 @@ class TransferService:
             chunk_size=chunk_size,
             total_chunks=total_chunks,
             expected_sha256=expected_sha256,
+            status=status,
         )
 
+        if status == "pending":
+            logger.info(
+                "Transfer %s created: %s (%d bytes), self-sent", transfer["id"], safe_name, size
+            )
+            return transfer
+
         sender = await DeviceRepository.get(self._conn, sender_id)
-        audience = [d for d in await self._audience(transfer) if d != sender_id]
         await self._connections.send_many(
             audience,
             event(
@@ -326,7 +352,7 @@ class TransferService:
         if device_id not in (transfer["sender_id"], transfer["receiver_id"]):
             raise Forbidden("This transfer does not involve your device")
 
-    async def require_may_answer(self, transfer: dict[str, Any], device_id: str) -> None:
+    async def require_may_answer(self, transfer: Mapping[str, Any], device_id: str) -> None:
         """Only the device a file was sent to may accept or refuse it.
 
         With one exception, and it is not a loophole: a file addressed to the PC
@@ -355,7 +381,7 @@ class TransferService:
         hosts = await DeviceRepository.list_hosts(self._conn)
         return any(self._connections.is_online(str(row["id"])) for row in hosts)
 
-    async def _audience(self, transfer: dict[str, Any]) -> list[str]:
+    async def _audience(self, transfer: Mapping[str, Any]) -> list[str]:
         """Which devices hear about this transfer.
 
         Normally the two parties. For a transfer addressed to the PC the

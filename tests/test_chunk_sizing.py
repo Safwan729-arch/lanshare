@@ -147,7 +147,7 @@ async def big_client(tmp_path: Path) -> AsyncIterator[AsyncClient]:
             async with AsyncClient(transport=transport, base_url="http://testserver") as http:
                 yield http
     finally:
-        CURRENT_APP.clear()
+        CURRENT_APP.remove(app)
 
 
 async def create_transfer(client: AsyncClient, sender: str, receiver: str, size: int) -> dict:

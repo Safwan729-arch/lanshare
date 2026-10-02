@@ -346,7 +346,9 @@ async def test_a_new_transfer_waits_for_the_recipient(app, client, sender, recei
     assert blocked.status_code == 409
 
 
-async def test_sending_to_a_device_that_is_not_there_is_refused(app, client, sender) -> None:
+async def test_sending_to_a_device_that_is_not_there_is_refused(
+    app, client, sender, settings
+) -> None:
     """Nothing is created, so there is nothing to clean up afterwards."""
     absent = await register(client, "A phone with no page open")
     # registered over loopback, so trusted, but no socket: nobody can answer
@@ -358,6 +360,8 @@ async def test_sending_to_a_device_that_is_not_there_is_refused(app, client, sen
     assert created.status_code == 409
     assert "isn't connected" in created.json()["detail"]
     assert (await client.get("/api/transfers", headers=headers(sender))).json()["transfers"] == []
+    assert list(settings.incoming_dir.iterdir()) == []
+    assert list(settings.temporary_dir.iterdir()) == []
 
 
 async def test_a_file_for_the_pc_reaches_the_host_page(app, client, lan_client, sender) -> None:
@@ -384,3 +388,62 @@ async def test_a_file_for_the_pc_reaches_the_host_page(app, client, lan_client, 
     incoming = [m for m in host_page.sent if m["type"] == "transfer.incoming"]
     assert len(incoming) == 1
     assert incoming[0]["data"]["status"] == "awaiting"
+
+
+async def test_a_phone_sending_to_the_pc_with_no_host_page_open_is_refused(
+    app, client, lan_client
+) -> None:
+    """The PC's row holds no socket, so with no host page open nobody can answer."""
+    offline_host = await register(client, "Host page, closed")  # a host with no socket
+    phone = await register(lan_client, "Phone")
+    await approve(client, offline_host, phone)
+    online(phone)
+    created = await lan_client.post(
+        "/api/transfers",
+        json={"filename": "q.bin", "size": 10, "receiver_id": app.state.server_device_id},
+        headers=headers(phone),
+    )
+    assert created.status_code == 409
+    assert "isn't connected" in created.json()["detail"]
+
+
+async def test_the_sender_is_not_told_about_its_own_transfer(
+    app, client, lan_client, sender, receiver
+) -> None:
+    """Without the exclusion the sender would be prompted to answer its own send."""
+    receiver_socket = online(receiver)
+    phone = await register(lan_client, "Phone")
+    await approve(client, sender, phone)
+    phone_socket = online(phone)
+    created = await lan_client.post(
+        "/api/transfers",
+        json={"filename": "r.bin", "size": 10, "receiver_id": receiver},
+        headers=headers(phone),
+    )
+    assert created.status_code == 201
+    assert [m for m in receiver_socket.sent if m["type"] == "transfer.incoming"]
+    assert not [m for m in phone_socket.sent if m["type"] == "transfer.incoming"]
+
+
+async def test_a_file_you_send_to_your_own_pc_needs_no_permission(app, client, sender) -> None:
+    """Consent protects you from other people's files, not from your own.
+
+    The host's page and the PC are different device rows, so the UI offers this
+    send - and the person who just pressed Send is the only one who could
+    answer the prompt. Asking them is ceremony, and worse, nobody is listening:
+    the sender is excluded from the announcement.
+    """
+    created = await client.post(
+        "/api/transfers",
+        json={"filename": "self.bin", "size": 10, "receiver_id": app.state.server_device_id},
+        headers=headers(sender),
+    )
+    assert created.status_code == 201
+    assert created.json()["status"] == "pending"
+
+    uploaded = await client.put(
+        f"/api/transfers/{created.json()['transfer_id']}/chunks/0",
+        content=b"x" * 10,
+        headers=headers(sender),
+    )
+    assert uploaded.status_code == 200
