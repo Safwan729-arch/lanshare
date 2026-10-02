@@ -1,12 +1,17 @@
 <#
 .SYNOPSIS
-    Creates the LANShare app icon.
+    Creates the LANShare app icons.
 
 .DESCRIPTION
-    Writes LANShare.lnk in the project folder, pointing at tools\LANShare.cmd
-    with the generated icon. That one is the app: copy it, or right-click it and
-    choose "Create shortcut", to put a launcher anywhere on the machine. A copied
-    .lnk keeps both the icon and the target, so the copies need nothing from here.
+    Writes two .lnk files in the project folder with the generated icon:
+    LANShare.lnk, pointing at tools\LANShare.cmd, and "LANShare Stop.lnk",
+    pointing at tools\LANShare-Stop.cmd. Closing the browser tab does not stop
+    the server - it runs in its own window - so the second icon is how it is
+    quit without going to look for that window.
+
+    Those two are the app: copy them, or right-click and choose "Create
+    shortcut", to put launchers anywhere on the machine. A copied .lnk keeps both
+    the icon and the target, so the copies need nothing from here.
 
     Re-running this overwrites the file, which is how to repair it after moving
     the project folder - and the copies, which point at the project folder rather
@@ -37,10 +42,27 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$target = Join-Path $PSScriptRoot 'LANShare.cmd'
 $icon = Join-Path $PSScriptRoot 'lanshare.ico'
 
-if (-not (Test-Path $target)) { throw "Missing launcher: $target" }
+# Two icons, because starting was one click and stopping was a hunt for a
+# console window. They are installed and removed together: a Start with no Stop
+# beside it is how the server ends up running for days unnoticed.
+$shortcuts = @(
+    @{
+        Link        = 'LANShare.lnk'
+        Target      = Join-Path $PSScriptRoot 'LANShare.cmd'
+        Description = 'Start LANShare and open it in the browser'
+    },
+    @{
+        Link        = 'LANShare Stop.lnk'
+        Target      = Join-Path $PSScriptRoot 'LANShare-Stop.cmd'
+        Description = 'Stop the LANShare server'
+    }
+)
+
+foreach ($entry in $shortcuts) {
+    if (-not (Test-Path $entry.Target)) { throw "Missing launcher: $($entry.Target)" }
+}
 
 # The project folder always, so there is one icon that belongs to the project
 # and everything else is a copy of it.
@@ -52,21 +74,23 @@ if ($StartMenu) {
 
 $shell = New-Object -ComObject WScript.Shell
 foreach ($folder in $locations) {
-    $link = Join-Path $folder 'LANShare.lnk'
+    foreach ($entry in $shortcuts) {
+        $link = Join-Path $folder $entry.Link
 
-    if ($Remove) {
-        if (Test-Path $link) {
-            Remove-Item $link -Force
-            Write-Host "Removed $link"
+        if ($Remove) {
+            if (Test-Path $link) {
+                Remove-Item $link -Force
+                Write-Host "Removed $link"
+            }
+            continue
         }
-        continue
-    }
 
-    $shortcut = $shell.CreateShortcut($link)
-    $shortcut.TargetPath = $target
-    $shortcut.WorkingDirectory = $root
-    $shortcut.Description = 'Start LANShare and open it in the browser'
-    if (Test-Path $icon) { $shortcut.IconLocation = "$icon,0" }
-    $shortcut.Save()
-    Write-Host "Created $link"
+        $shortcut = $shell.CreateShortcut($link)
+        $shortcut.TargetPath = $entry.Target
+        $shortcut.WorkingDirectory = $root
+        $shortcut.Description = $entry.Description
+        if (Test-Path $icon) { $shortcut.IconLocation = "$icon,0" }
+        $shortcut.Save()
+        Write-Host "Created $link"
+    }
 }

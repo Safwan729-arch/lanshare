@@ -13,10 +13,17 @@ other fails here rather than shipping a stale picture.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import os
+import re
 import shutil
+import socket
 import struct
 import subprocess
+import sys
+import time
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -157,3 +164,226 @@ def test_the_powershell_scripts_parse(script: Path) -> None:
         timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+# --- Stopping -------------------------------------------------------------
+#
+# Starting was one click and stopping was "find the console window", so there is
+# a second shortcut. These cover the part that could do damage: it must stop
+# this project's server and nothing else that happens to hold the port.
+
+STOPPER = TOOLS / "lanshare-stop.ps1"
+STOP_SHIM = TOOLS / "LANShare-Stop.cmd"
+
+
+def test_every_stopper_file_is_present() -> None:
+    for path in (STOPPER, STOP_SHIM):
+        assert path.is_file(), f"missing {path.name}"
+
+
+def test_the_stopper_scopes_what_it_stops_to_this_project() -> None:
+    """Killing by name or by whoever holds the port would hit innocent processes."""
+    code = code_lines(read(STOPPER))
+    assert r".venv\Scripts\python.exe" in code, "must match this project's interpreter"
+    assert "CommandLine" in code, "the match has to read the command line"
+    assert "taskkill" not in code.lower()
+    assert "-Name" not in code, "Stop-Process -Name python would stop unrelated work"
+
+
+def test_the_stopper_resolves_the_port_the_way_the_server_does() -> None:
+    code = code_lines(read(STOPPER))
+    assert "LANSHARE_PORT" in code
+    assert "'.env'" in code
+    assert "8080" in code
+
+
+def test_the_stop_shim_points_at_the_stopper_that_exists() -> None:
+    shim = read(STOP_SHIM)
+    assert STOPPER.name in shim
+    assert "-ExecutionPolicy Bypass" in shim
+    assert "pause" in shim, "a refusal must not close before it is read"
+
+
+def test_the_stop_shim_uses_windows_line_endings() -> None:
+    raw = STOP_SHIM.read_bytes()
+    assert b"\r\n" in raw
+    assert b"\n" not in raw.replace(b"\r\n", b"")
+
+
+def test_the_installer_creates_both_shortcuts() -> None:
+    installer = read(INSTALLER)
+    for name in (SHIM.name, STOP_SHIM.name, "LANShare.lnk", "LANShare Stop.lnk"):
+        assert name in installer, f"the installer never mentions {name}"
+
+
+def test_the_launcher_titles_the_server_window() -> None:
+    """The window is the only way to stop it by hand; it has to be findable."""
+    assert "LANShare server" in code_lines(read(LAUNCHER))
+
+
+def free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+def run_stopper(port: int) -> subprocess.CompletedProcess[str]:
+    env = {**os.environ, "LANSHARE_PORT": str(port)}
+    return subprocess.run(
+        [str(powershell), "-NoProfile", "-NonInteractive", "-File", str(STOPPER)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+    )
+
+
+@pytest.mark.skipif(powershell is None, reason="powershell is not installed")
+def test_stopping_when_nothing_is_running_is_not_an_error() -> None:
+    """Double-clicking Stop twice is normal and must not look like a failure."""
+    result = run_stopper(free_port())
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "not running" in result.stdout.lower()
+    assert "stopping" not in result.stdout.lower(), "it stopped something on another port"
+
+
+@pytest.mark.skipif(powershell is None, reason="powershell is not installed")
+def test_the_stopper_leaves_another_program_on_the_port_alone() -> None:
+    """The port is the clue, not the warrant: only a LANShare process is stopped."""
+    port = free_port()
+    listener = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import socket,sys,time\n"
+            "s=socket.socket()\n"
+            f"s.bind(('127.0.0.1',{port}))\n"
+            "s.listen(1)\n"
+            "print('up',flush=True)\n"
+            "time.sleep(120)\n",
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert listener.stdout is not None
+        assert listener.stdout.readline().strip() == "up"
+
+        result = run_stopper(port)
+
+        assert listener.poll() is None, "it stopped a program that was not LANShare"
+        assert result.returncode != 0, "refusing to stop must not report success"
+        assert "not LANShare" in result.stdout, "the refusal has to say what it found"
+        assert re.search(r"pid \d+", result.stdout), "the refusal has to name the pid"
+    finally:
+        listener.kill()
+        listener.wait(timeout=30)
+
+
+VENV_PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
+
+
+def health(port: int) -> bool:
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=2) as answer:
+            return bool(answer.status == 200)
+    except Exception:
+        return False
+
+
+@contextlib.contextmanager
+def real_server(port: int, tmp_path: Path, like_the_launcher: bool = False):
+    """A real `python -m lanshare`, on its own port and its own directories.
+
+    The stopper reads the live process table, so nothing less than a real
+    process exercises it. Discovery is off: this server is a stop target, not a
+    LAN citizen, and it should not advertise itself to the user's phone.
+
+    `like_the_launcher` reproduces how the shortcut starts it - through cmd, to
+    title the window - because that command line is not the obvious one: cmd
+    quotes the interpreter and leaves *two* spaces before `-m`.
+    """
+    env = {
+        **os.environ,
+        "LANSHARE_PORT": str(port),
+        "LANSHARE_DATA_DIR": str(tmp_path / "data"),
+        "LANSHARE_INCOMING_DIR": str(tmp_path / "incoming"),
+        "LANSHARE_TEMPORARY_DIR": str(tmp_path / "temporary"),
+        "LANSHARE_ENABLE_MDNS": "false",
+        "LANSHARE_ENABLE_UDP_DISCOVERY": "false",
+    }
+    command: str | list[str] = [str(VENV_PYTHON), "-m", "lanshare"]
+    if like_the_launcher:
+        comspec = os.environ.get("COMSPEC", "cmd.exe")
+        # A string, not a list: the doubled space has to survive into the real
+        # command line rather than be normalised away by list quoting.
+        command = f'{comspec} /c title LANShare server & "{VENV_PYTHON}"  -m lanshare'
+    process = subprocess.Popen(command, cwd=str(ROOT), env=env)
+    try:
+        deadline = time.monotonic() + 40
+        while time.monotonic() < deadline:
+            if health(port):
+                break
+            assert process.poll() is None, "the server exited before it answered"
+            time.sleep(0.3)
+        else:
+            raise AssertionError(f"the server never answered on port {port}")
+        yield process
+    finally:
+        if process.poll() is None:
+            # Through cmd there is a child to take with it; kill() would orphan
+            # the server on the port and the next test would inherit it.
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                capture_output=True,
+            )
+        process.wait(timeout=30)
+
+
+@pytest.mark.skipif(powershell is None, reason="powershell is not installed")
+@pytest.mark.skipif(
+    not VENV_PYTHON.is_file() or Path(sys.executable).resolve() != VENV_PYTHON.resolve(),
+    reason="needs pytest running on the project venv's interpreter",
+)
+def test_the_stopper_ignores_a_server_on_a_different_port(tmp_path: Path) -> None:
+    """Matching only the command line would stop the wrong LANShare."""
+    port = free_port()
+    with real_server(port, tmp_path):
+        result = run_stopper(free_port())
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "not running" in result.stdout.lower()
+        assert health(port), "it stopped a server it was not pointed at"
+
+
+@pytest.mark.skipif(powershell is None, reason="powershell is not installed")
+@pytest.mark.skipif(
+    not VENV_PYTHON.is_file() or Path(sys.executable).resolve() != VENV_PYTHON.resolve(),
+    reason="needs pytest running on the project venv's interpreter",
+)
+def test_the_stopper_stops_the_server_on_its_port(tmp_path: Path) -> None:
+    port = free_port()
+    with real_server(port, tmp_path) as process:
+        result = run_stopper(port)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "stopped" in result.stdout.lower()
+        assert not health(port), "the server still answers"
+        # The venv's python.exe is a stub holding the real interpreter; both go.
+        assert process.wait(timeout=30) is not None
+
+
+@pytest.mark.skipif(powershell is None, reason="powershell is not installed")
+@pytest.mark.skipif(
+    not VENV_PYTHON.is_file() or Path(sys.executable).resolve() != VENV_PYTHON.resolve(),
+    reason="needs pytest running on the project venv's interpreter",
+)
+def test_the_stopper_stops_a_server_started_by_the_shortcut(tmp_path: Path) -> None:
+    """The shape that matters: the one the Start icon actually produces."""
+    port = free_port()
+    with real_server(port, tmp_path, like_the_launcher=True):
+        result = run_stopper(port)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "not LANShare" not in result.stdout, "it did not recognise its own server"
+        assert not health(port), "the server still answers"

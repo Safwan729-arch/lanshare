@@ -82,7 +82,13 @@ Run the one-time setup first, from the project folder:
 }
 
 Write-Step 'starting the server'
-Start-Process -FilePath $python -ArgumentList '-m', 'lanshare' -WorkingDirectory $root
+# Routed through cmd only to title the window: the server's console is the one
+# place to read the QR and the log, and an untitled "python" in the taskbar is
+# the thing people lose. The interpreter and its arguments are unchanged, so the
+# ADR-0011 rule above still holds - `title` runs and exits, then python -m runs.
+Start-Process -FilePath $env:ComSpec -WorkingDirectory $root -ArgumentList @(
+    '/c', 'title LANShare server &', "`"$python`"", '-m', 'lanshare'
+)
 
 # Startup does real work - schema migrations, mDNS, the QR - so this waits
 # rather than assuming. 30s is long enough for a cold first run on a slow disk.
@@ -104,6 +110,7 @@ already holds the port.
 Write-Step "opening $page"
 Start-Process $page
 Write-Host ''
-Write-Host '  The server keeps running in its own window. Close it or press Ctrl+C there to stop.' -ForegroundColor DarkGray
+Write-Host '  The server keeps running in the "LANShare server" window - closing the' -ForegroundColor DarkGray
+Write-Host '  browser tab does not stop it. Use the LANShare Stop icon, or Ctrl+C there.' -ForegroundColor DarkGray
 Write-Host ''
 exit 0

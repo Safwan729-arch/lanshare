@@ -112,24 +112,32 @@ uvicorn lanshare.main:app --host 0.0.0.0 --port 8080 --reload --app-dir server -
 
 ### One click instead of a command
 
-Run this once to create the app icon, `LANShare.lnk`, in the project folder:
+Run this once to create two app icons, `LANShare.lnk` and `LANShare Stop.lnk`, in the
+project folder:
 
 ```powershell
 .\tools\install-shortcut.ps1
 ```
 
-Double-clicking it starts the server in its own window, waits until the server answers, and
-opens the page in your browser. Double-clicking it again when the server is already up just
-opens the page instead of starting a second one.
+Double-clicking **LANShare** starts the server in its own window, waits until the server
+answers, and opens the page in your browser. Double-clicking it again when the server is
+already up just opens the page instead of starting a second one.
 
-To launch it from somewhere else - the desktop, a folder you keep open, the taskbar - copy
-`LANShare.lnk` there, or right-click it and choose **Create shortcut**. A copied .lnk keeps
-the icon and still points at the project, so the copies need nothing of their own. The
-script can also place them for you: `-Desktop`, `-StartMenu`, and `-Remove` to delete the
-ones it made.
+**Closing the browser tab does not stop the server** — the page is only a client, and the
+PC stays reachable so a phone can send to it. The server runs on in the window titled
+`LANShare server`. Double-click **LANShare Stop** to quit it, or press Ctrl+C in that
+window. Stopping when nothing is running is not an error, so the Stop icon is safe to
+double-click twice; and if something that is not LANShare holds the port, it says so and
+stops nothing.
 
-The .lnk stores absolute paths, so it is not committed, and it stops working if you move
-the project folder. Re-run the script to repair it.
+To launch from somewhere else - the desktop, a folder you keep open, the taskbar - copy the
+.lnk files there, or right-click and choose **Create shortcut**. A copied .lnk keeps the
+icon and still points at the project, so the copies need nothing of their own. The script
+can also place them for you: `-Desktop`, `-StartMenu`, and `-Remove` to delete the ones it
+made.
+
+The .lnk files store absolute paths, so they are not committed, and they stop working if
+you move the project folder. Re-run the script to repair them.
 
 ### First run on Windows
 
@@ -453,10 +461,11 @@ frontend/                # No build step, no npm, no framework
 ├── css/styles.css
 └── js/                  # app, api, ws, upload, devices, ui (ES modules)
 
-tools/                   # Desktop launcher: LANShare.cmd, the .ps1 behind it,
-                         # install-shortcut.ps1, and make_icon.py (draws the .ico)
+tools/                   # Desktop launcher: LANShare.cmd / LANShare-Stop.cmd, the
+                         # two .ps1 scripts behind them, install-shortcut.ps1,
+                         # and make_icon.py (draws the .ico)
 
-tests/                   # 357 tests
+tests/                   # 371 tests
 ```
 
 Routers stay thin, logic lives in `services/`, and **all** SQL lives in

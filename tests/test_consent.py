@@ -673,7 +673,5 @@ async def test_the_host_page_is_not_a_party_to_a_file_sent_to_the_pc(
     )
     await lan_client.post(f"/api/transfers/{transfer_id}/complete", headers=headers(phone))
 
-    refused = await client.get(
-        f"/api/files/{transfer_id}/download", headers=headers(sender)
-    )
+    refused = await client.get(f"/api/files/{transfer_id}/download", headers=headers(sender))
     assert refused.status_code == 403
