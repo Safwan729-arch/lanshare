@@ -91,12 +91,17 @@ async def test_only_the_addressed_device_may_answer(app, client, sender, receive
         await service.require_may_answer(transfer, sender)
 
 
-async def test_a_host_may_answer_for_the_pc(app, client, sender) -> None:
-    """A file addressed to the PC has no browser behind it to accept."""
+async def test_a_host_may_answer_for_the_pc(app, client, lan_client, sender) -> None:
+    """A file addressed to the PC has no browser behind it to accept.
+
+    Only a host may stand in: a trusted phone is not one.
+    """
     service = app.state.transfer_service
+    phone = await register(lan_client, "Phone")
+    await approve(client, sender, phone)
     transfer_id = await send_file(
-        client,
-        sender_id=sender,
+        lan_client,
+        sender_id=phone,
         receiver_id=app.state.server_device_id,
         filename="e.bin",
         payload=b"x" * 10,
@@ -106,13 +111,28 @@ async def test_a_host_may_answer_for_the_pc(app, client, sender) -> None:
     # `sender` registered over loopback, so it is a host device.
     await service.require_may_answer(transfer, sender)
 
+    with pytest.raises(Forbidden):
+        await service.require_may_answer(transfer, phone)
 
-async def test_a_transfer_for_the_pc_is_announced_to_the_host(app, client, sender) -> None:
-    """The host's page is a different device from the row the file is addressed to."""
+
+async def test_a_transfer_for_the_pc_is_announced_to_the_host(
+    app, client, lan_client, sender
+) -> None:
+    """The host's page is a different device from the row the file is addressed to.
+
+    Sent from a phone on the LAN deliberately: with a loopback sender the test
+    cannot fail, because the sender is itself a host and is in the audience
+    either way.
+    """
     service = app.state.transfer_service
+    phone = await register(lan_client, "Phone")
+    bystander = await register(lan_client, "Another phone")
+    await approve(client, sender, phone)
+    await approve(client, sender, bystander)
+
     transfer_id = await send_file(
-        client,
-        sender_id=sender,
+        lan_client,
+        sender_id=phone,
         receiver_id=app.state.server_device_id,
         filename="f.bin",
         payload=b"x" * 10,
@@ -121,3 +141,4 @@ async def test_a_transfer_for_the_pc_is_announced_to_the_host(app, client, sende
 
     audience = await service._audience(transfer)
     assert sender in audience, "the host's own page must hear about it"
+    assert bystander not in audience, "a trusted device that is not the host must not"

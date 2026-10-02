@@ -82,8 +82,8 @@ class TransferService:
         connections: ConnectionManager,
         chunk_size: int,
         max_file_size: int,
+        server_device_id: str,
         stale_after_hours: int = 24,
-        server_device_id: str | None = None,
     ) -> None:
         self._conn = connection
         self._storage = storage
@@ -91,8 +91,6 @@ class TransferService:
         self._chunk_size = chunk_size
         self._max_file_size = max_file_size
         self._stale_after_hours = stale_after_hours
-        # Set by the lifespan once the host's own row exists. Until then no
-        # transfer can be addressed to it anyway.
         self._server_device_id = server_device_id
         # One lock per transfer being completed. Two concurrent completes both
         # pass the "already completed?" check, both assemble, and the loser
