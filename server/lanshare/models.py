@@ -86,7 +86,6 @@ class DeviceResponse(BaseModel):
     online: bool
     last_seen: str
     trust_state: TrustState = "pending"
-    first_address: str | None = None
     approved_at: str | None = None
 
     @classmethod
@@ -98,8 +97,31 @@ class DeviceResponse(BaseModel):
             online=online,
             last_seen=row["last_seen"],
             trust_state=row.get("trust_state", "pending"),
-            first_address=row.get("first_address"),
             approved_at=row.get("approved_at"),
+        )
+
+
+class DeviceWithAddressResponse(DeviceResponse):
+    """A device, plus the address it first registered from.
+
+    The address is how the host tells its own phone from a neighbour's before
+    approving it, and it is of no use to anyone who cannot act on it. It lives
+    on its own model so that sending it somewhere new is a deliberate choice,
+    rather than a field that quietly rides along in every device payload.
+
+    Only the host's pending views, and a device's own registration record, use
+    this. See ADR-0015 and ADR-0019.
+    """
+
+    first_address: str | None = None
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any], *, online: bool) -> DeviceWithAddressResponse:
+        # Spread rather than re-list the fields: a field added to the base must
+        # not need remembering here.
+        return cls(
+            **DeviceResponse.from_row(row, online=online).model_dump(),
+            first_address=row.get("first_address"),
         )
 
 
@@ -111,7 +133,9 @@ class DeviceRegisterResponse(BaseModel):
     keeps just a hash. A device that loses it must register as a new device.
     """
 
-    device: DeviceResponse
+    # With its address: this is the device being told what the server recorded
+    # about it, which is its own business and nobody else's.
+    device: DeviceWithAddressResponse
     token: str | None = None
 
 
@@ -129,6 +153,12 @@ class ConsentDecisionRequest(BaseModel):
 
 class DeviceListResponse(BaseModel):
     devices: list[DeviceResponse]
+
+
+class DeviceWithAddressListResponse(BaseModel):
+    """The host's view of devices waiting for approval."""
+
+    devices: list[DeviceWithAddressResponse]
 
 
 class TransferCreateRequest(BaseModel):

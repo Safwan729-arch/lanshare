@@ -12,6 +12,7 @@ import pytest
 from conftest import approve, headers, register, send_file
 from fastapi import FastAPI
 from httpx import AsyncClient
+from lanshare.models import DeviceResponse, DeviceWithAddressResponse
 from lanshare.services.auth import (
     generate_token,
     hash_token,
@@ -533,3 +534,54 @@ async def test_a_real_pending_device_is_still_listed(
 
     listed = await client.get("/api/devices/pending", headers=headers(sender))
     assert waiting in {d["id"] for d in listed.json()["devices"]}
+
+
+# -- an address is told to whoever can act on it, and no one else -------------
+#
+# `first_address` is how the host tells its own phone from a neighbour's before
+# approving it. It is of no use to a device that cannot approve anyone, so it
+# belongs on the host's pending views and on a device's own record - not in the
+# list every paired device reads, where nothing displays it anyway.
+
+
+async def test_the_device_list_does_not_carry_addresses(
+    client: AsyncClient, sender: str, receiver: str
+) -> None:
+    listed = await client.get("/api/devices", headers=headers(sender))
+    assert listed.status_code == 200
+
+    devices = listed.json()["devices"]
+    assert devices, "nothing was listed, so nothing was proved"
+    for device in devices:
+        assert "first_address" not in device, device
+
+
+async def test_the_device_list_event_does_not_carry_addresses(
+    app: FastAPI, client: AsyncClient, sender: str
+) -> None:
+    """`device.list` reaches every paired device."""
+    from lanshare.api.devices import device_list_event
+
+    body = await device_list_event(
+        app.state.database.connection, app.state.connections, app.state.server_device_id
+    )
+
+    assert body["data"]["devices"], "nothing was listed, so nothing was proved"
+    for device in body["data"]["devices"]:
+        assert "first_address" not in device, device
+
+
+def test_the_plain_device_model_has_no_address() -> None:
+    """Pins every consumer of it at once - `device.joined` among them."""
+    assert "first_address" not in DeviceResponse.model_fields
+    assert "first_address" in DeviceWithAddressResponse.model_fields
+
+
+async def test_the_host_still_sees_where_a_waiting_device_came_from(
+    client: AsyncClient, lan_client: AsyncClient, sender: str
+) -> None:
+    waiting, _ = await pending_device(lan_client)
+
+    listed = await client.get("/api/devices/pending", headers=headers(sender))
+    waiting_row = next(d for d in listed.json()["devices"] if d["id"] == waiting)
+    assert waiting_row["first_address"] == "192.168.1.50"

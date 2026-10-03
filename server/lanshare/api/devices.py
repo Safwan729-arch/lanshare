@@ -15,6 +15,8 @@ from ..models import (
     DeviceRegisterRequest,
     DeviceRegisterResponse,
     DeviceResponse,
+    DeviceWithAddressListResponse,
+    DeviceWithAddressResponse,
     TrustDecisionRequest,
 )
 from ..services.auth import (
@@ -76,7 +78,9 @@ async def register_device(
         )
         assert refreshed is not None
         return DeviceRegisterResponse(
-            device=DeviceResponse.from_row(refreshed, online=connections.is_online(refreshed["id"]))
+            device=DeviceWithAddressResponse.from_row(
+                refreshed, online=connections.is_online(refreshed["id"])
+            )
         )
 
     token = generate_token()
@@ -121,11 +125,13 @@ async def register_device(
             request,
             event(
                 "device.pending",
-                device=DeviceResponse.from_row(device, online=False).model_dump(),
+                device=DeviceWithAddressResponse.from_row(device, online=False).model_dump(),
             ),
         )
 
-    return DeviceRegisterResponse(device=DeviceResponse.from_row(device, online=False), token=token)
+    return DeviceRegisterResponse(
+        device=DeviceWithAddressResponse.from_row(device, online=False), token=token
+    )
 
 
 def _token_from_request(request: Request) -> str | None:
@@ -146,15 +152,17 @@ async def whoami(device: AuthedDeviceDep, connections: ConnectionsDep) -> Device
     return DeviceResponse.from_row(device, online=connections.is_online(device["id"]))
 
 
-@router.get("/pending", response_model=DeviceListResponse)
-async def list_pending(_: HostDeviceDep, conn: ConnectionDep) -> DeviceListResponse:
+@router.get("/pending", response_model=DeviceWithAddressListResponse)
+async def list_pending(_: HostDeviceDep, conn: ConnectionDep) -> DeviceWithAddressListResponse:
     """Devices waiting for approval. The host only.
 
     It names every device waiting and the address it came from, which is of no
     use to anyone who cannot act on it.
     """
     rows = await DeviceRepository.list_by_trust(conn, PENDING, only_with_token=True)
-    return DeviceListResponse(devices=[DeviceResponse.from_row(r, online=False) for r in rows])
+    return DeviceWithAddressListResponse(
+        devices=[DeviceWithAddressResponse.from_row(r, online=False) for r in rows]
+    )
 
 
 @router.post("/{device_id}/trust", response_model=DeviceResponse)
@@ -242,7 +250,7 @@ async def _pending_event(conn: aiosqlite.Connection) -> dict[str, Any]:
     rows = await DeviceRepository.list_by_trust(conn, PENDING, only_with_token=True)
     return event(
         "device.pending.list",
-        devices=[DeviceResponse.from_row(r, online=False).model_dump() for r in rows],
+        devices=[DeviceWithAddressResponse.from_row(r, online=False).model_dump() for r in rows],
     )
 
 
