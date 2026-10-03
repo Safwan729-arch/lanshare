@@ -18,8 +18,31 @@ the codebase.
 
 ---
 
+## Status
+
+**v0.1.0 — early, and honest about it.** Sending works end to end and has been confirmed on
+real devices: iPhone Safari and Android Chrome ⇄ Windows, multi-chunk files, SHA-256 verified
+against the file on disk. 388 tests, `ruff` and `mypy` clean.
+
+What to know before you rely on it:
+
+- **It serves plain http by default**, so a device's token is readable by anyone who can
+  capture traffic on your network. Pairing raises the bar from "anyone on the Wi-Fi can send
+  you files" to "someone has to be approved once" — it is not protection against a packet
+  sniffer. [HTTPS is one setting away](#optional-https) and off by default only because a
+  self-signed certificate means a browser warning on every device and a trust profile on iOS.
+  See [what this does and does not do](#who-is-allowed-in).
+- **Two of the three discovery mechanisms are verified on one machine only.** `lanshare.local`
+  resolves and serves on the PC, but has not been reached from a phone yet; UDP peer discovery
+  has been run with two instances on one PC, not across two. Neither is needed for a transfer.
+- **Receiving in a browser buffers the whole file**, so the receive ceiling is far below the
+  256 GiB send limit and is unmeasured. Test with something large before trusting it.
+- **The one-click launcher is Windows-only.** macOS and Linux run `python -m lanshare`.
+- **No CI yet** — the checks are run by hand.
+
 ## Contents
 
+- [Status](#status)
 - [Why this exists](#why-this-exists)
 - [Quick start](#quick-start)
 - [Using it](#using-it)
@@ -299,10 +322,17 @@ Three independent mechanisms, none of which a transfer depends on:
 - **QR code** — of the LAN URL, shown in the startup banner and on the PC's own page under
   **Add a device**. The QR encodes the IP, not the mDNS name, because the IP always resolves.
 - **mDNS** — the server advertises `_http._tcp` with an A record, so `http://lanshare.local:8080`
-  works on Apple devices out of the box. Most Android browsers cannot resolve `.local`.
+  should work on Apple devices out of the box. Most Android browsers cannot resolve `.local`.
 - **UDP broadcast** — finds *other LANShare servers* on the network, listed under **Other
   LANShare servers**. Discovery only: they stay separate servers with their own devices and
   files, and nothing is ever sent between them.
+
+> **How far these are verified.** The QR path has been scanned with a real phone camera and
+> works. The other two are built and tested, but on one machine only: mDNS advertises,
+> resolves and serves on the PC itself, and has not yet been reached from a phone by name;
+> peer discovery has been run as two instances on one PC — mutual discovery, TTL expiry and
+> goodbye — but not across two separate machines. Use the QR or type the address, and treat
+> the other two as conveniences that may or may not survive your network.
 
 The UDP layer is server-to-server because browsers cannot open raw sockets. Announcements are
 unauthenticated by nature, so the parser caps the datagram at 1 KiB before decoding, validates

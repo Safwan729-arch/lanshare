@@ -1,5 +1,5 @@
 -- LANShare schema. Applied on every startup; must stay idempotent.
--- Any change here needs a numbered migration + an ADR (CLAUDE.md 7.4).
+-- Any change here needs a numbered migration in migrations/ - see its README.
 
 CREATE TABLE IF NOT EXISTS devices (
     id          TEXT PRIMARY KEY,

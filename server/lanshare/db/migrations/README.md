@@ -12,4 +12,5 @@ Both paths converge on the same schema:
 That is why the new columns are *not* also added to `schema.sql`: a fresh
 database would then hit "duplicate column name" when the migration ran.
 
-Name files `NNN_short_description.sql`. Each needs an ADR (CLAUDE.md 7.4).
+Name files `NNN_short_description.sql`. Each one is a decision worth recording:
+write down why the shape changed, not just what changed.
