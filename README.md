@@ -22,7 +22,7 @@ the codebase.
 
 **v0.1.0 — early, and honest about it.** Sending works end to end and has been confirmed on
 real devices: iPhone Safari and Android Chrome ⇄ Windows, multi-chunk files, SHA-256 verified
-against the file on disk. 388 tests, `ruff` and `mypy` clean.
+against the file on disk. The test suite, `ruff` and `mypy` all pass.
 
 What to know before you rely on it:
 
@@ -495,7 +495,7 @@ tools/                   # Desktop launcher: LANShare.cmd / LANShare-Stop.cmd, t
                          # two .ps1 scripts behind them, install-shortcut.ps1,
                          # and make_icon.py (draws the .ico)
 
-tests/                   # 371 tests
+tests/                   # pytest + httpx, one file per concern
 ```
 
 Routers stay thin, logic lives in `services/`, and **all** SQL lives in
@@ -504,7 +504,7 @@ Routers stay thin, logic lives in `services/`, and **all** SQL lives in
 ## Development
 
 ```powershell
-pytest                      # 247 tests
+pytest                      # the whole suite
 ruff check .
 ruff format .
 mypy server
